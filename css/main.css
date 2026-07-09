@@ -1,0 +1,204 @@
+/* ============================================
+   BudgetMe — main.css
+   Variabili, reset, layout, dark/light mode
+   ============================================ */
+
+/* --- Variabili tema chiaro --- */
+:root {
+  --bg:            #f5f4ef;
+  --bg-card:       #ffffff;
+  --bg-nav:        #ffffff;
+  --border:        #e1e0d9;
+  --text:          #0b0b0b;
+  --text-sub:      #5f5e5a;
+  --text-muted:    #898781;
+
+  --blue:          #2a78d6;
+  --blue-light:    #dce9f8;
+  --green:         #1baf7a;
+  --green-light:   #d0f0e4;
+  --red:           #e34948;
+  --red-light:     #faece7;
+  --orange:        #d4720f;
+  --orange-light:  #fde8d3;
+  --purple:        #7c3d9e;
+  --purple-light:  #ead6f8;
+  --gray:          #444441;
+  --gray-light:    #d3d1c7;
+
+  --radius:        12px;
+  --radius-sm:     8px;
+  --shadow:        0 1px 4px rgba(0,0,0,0.08);
+  --nav-h:         64px;
+  --header-h:      56px;
+  --font:          -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
+}
+
+/* --- Variabili tema scuro --- */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg:         #0b0b0b;
+    --bg-card:    #1a1a18;
+    --bg-nav:     #111110;
+    --border:     #2c2c2a;
+    --text:       #f0efe8;
+    --text-sub:   #b4b2a9;
+    --text-muted: #666460;
+  }
+}
+
+/* --- Reset --- */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { font-size: 16px; -webkit-text-size-adjust: 100%; }
+body {
+  font-family: var(--font);
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100dvh;
+  overflow-x: hidden;
+}
+a { color: inherit; text-decoration: none; }
+button { cursor: pointer; border: none; background: none; font-family: inherit; }
+input, select, textarea {
+  font-family: inherit;
+  font-size: 1rem;
+  color: var(--text);
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px 14px;
+  width: 100%;
+  outline: none;
+  transition: border-color 0.15s;
+}
+input:focus, select:focus, textarea:focus { border-color: var(--blue); }
+input[type="number"] { -moz-appearance: textfield; }
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; }
+
+/* --- Layout principale --- */
+#app {
+  display: flex;
+  flex-direction: column;
+  min-height: 100dvh;
+}
+
+/* Header fisso in cima */
+#header {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  height: var(--header-h);
+  background: var(--bg-nav);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+  z-index: 100;
+}
+#header h1 {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--blue);
+}
+#header-actions { display: flex; gap: 8px; }
+
+/* Area contenuto — margini per header e navbar */
+#content {
+  flex: 1;
+  margin-top: var(--header-h);
+  margin-bottom: var(--nav-h);
+  padding: 16px;
+  overflow-y: auto;
+}
+
+/* Navbar fissa in basso */
+#navbar {
+  position: fixed;
+  bottom: 0; left: 0; right: 0;
+  height: var(--nav-h);
+  background: var(--bg-nav);
+  border-top: 1px solid var(--border);
+  display: flex;
+  align-items: stretch;
+  z-index: 100;
+}
+.nav-item {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  padding: 6px 4px;
+  color: var(--text-muted);
+  font-size: 0.65rem;
+  font-weight: 500;
+  transition: color 0.15s;
+  -webkit-tap-highlight-color: transparent;
+}
+.nav-item svg { width: 22px; height: 22px; stroke-width: 1.8; }
+.nav-item.active { color: var(--blue); }
+.nav-item.active svg { stroke: var(--blue); }
+
+/* --- Tipografia --- */
+.page-title {
+  font-size: 1.3rem;
+  font-weight: 700;
+  margin-bottom: 16px;
+}
+.section-title {
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  margin: 20px 0 8px;
+}
+.label {
+  font-size: 0.8rem;
+  color: var(--text-sub);
+  margin-bottom: 4px;
+}
+
+/* --- Utilità --- */
+.mt-8  { margin-top: 8px; }
+.mt-16 { margin-top: 16px; }
+.mt-24 { margin-top: 24px; }
+.mb-8  { margin-bottom: 8px; }
+.mb-16 { margin-bottom: 16px; }
+.text-right { text-align: right; }
+.text-center { text-align: center; }
+.hidden { display: none !important; }
+.flex { display: flex; }
+.flex-between { display: flex; justify-content: space-between; align-items: center; }
+.flex-center  { display: flex; justify-content: center; align-items: center; }
+.gap-8  { gap: 8px; }
+.gap-12 { gap: 12px; }
+
+/* Colori testo semantici */
+.text-positive { color: var(--green); }
+.text-negative { color: var(--red); }
+.text-blue     { color: var(--blue); }
+.text-sub      { color: var(--text-sub); }
+.text-muted    { color: var(--text-muted); }
+
+/* --- Spinner caricamento --- */
+.spinner {
+  width: 32px; height: 32px;
+  border: 3px solid var(--border);
+  border-top-color: var(--blue);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  margin: 40px auto;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* --- Empty state --- */
+.empty-state {
+  text-align: center;
+  padding: 48px 24px;
+  color: var(--text-muted);
+}
+.empty-state svg { width: 48px; height: 48px; margin-bottom: 12px; opacity: 0.4; }
+.empty-state p { font-size: 0.9rem; }

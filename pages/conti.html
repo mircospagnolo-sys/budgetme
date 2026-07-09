@@ -1,0 +1,131 @@
+<!-- Conti Correnti -->
+<div style="display:flex;justify-content:flex-end;margin-bottom:12px"><button class="btn btn-primary btn-sm" onclick="window._nuovoConto()"><i data-lucide="plus" style="width:14px;height:14px"></i> Aggiungi conto</button></div><div id="conti-root">
+  <div class="spinner"></div>
+</div>
+
+<!-- Modal: aggiungi/modifica conto -->
+<div id="modal-conto" class="modal-overlay hidden">
+  <div class="modal">
+    <div class="modal-header">
+      <h2 class="modal-title" id="modal-conto-title">Nuovo conto</h2>
+      <button class="modal-close" id="btn-close-conto" aria-label="Chiudi">
+        <i data-lucide="x"></i>
+      </button>
+    </div>
+    <div class="form-group">
+      <div class="label">Nome conto *</div>
+      <input type="text" id="conto-nome" placeholder="es. UniCredit principale">
+    </div>
+    <div class="form-group">
+      <div class="label">Banca *</div>
+      <input type="text" id="conto-banca" placeholder="es. UniCredit">
+    </div>
+    <div class="form-group">
+      <div class="label">IBAN</div>
+      <input type="text" id="conto-iban" placeholder="IT00 X000 0000 0000 0000 0000 000">
+    </div>
+    <div class="form-group">
+      <div class="label">Saldo attuale (€) *</div>
+      <input type="number" id="conto-saldo" placeholder="0.00" step="0.01" inputmode="decimal">
+    </div>
+    <div class="form-group">
+      <div class="label">Colore identificativo</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap" id="color-picker">
+        <button class="color-dot active" data-color="#2a78d6" style="background:#2a78d6"></button>
+        <button class="color-dot" data-color="#1baf7a" style="background:#1baf7a"></button>
+        <button class="color-dot" data-color="#7c3d9e" style="background:#7c3d9e"></button>
+        <button class="color-dot" data-color="#d4720f" style="background:#d4720f"></button>
+        <button class="color-dot" data-color="#e34948" style="background:#e34948"></button>
+        <button class="color-dot" data-color="#444441" style="background:#444441"></button>
+      </div>
+    </div>
+    <div class="form-group">
+      <div class="label">Note</div>
+      <input type="text" id="conto-note" placeholder="Opzionale">
+    </div>
+    <div class="form-actions">
+      <button class="btn btn-ghost" id="btn-cancel-conto">Annulla</button>
+      <button class="btn btn-primary" id="btn-save-conto">Salva</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: aggiungi movimento -->
+<div id="modal-movimento" class="modal-overlay hidden">
+  <div class="modal">
+    <div class="modal-header">
+      <h2 class="modal-title">Nuovo movimento</h2>
+      <button class="modal-close" id="btn-close-movimento" aria-label="Chiudi">
+        <i data-lucide="x"></i>
+      </button>
+    </div>
+    <!-- Tipo movimento -->
+    <div class="tabs" style="margin-bottom:16px">
+      <button class="tab-btn active" data-tipo="uscita">Uscita</button>
+      <button class="tab-btn" data-tipo="entrata">Entrata</button>
+      <button class="tab-btn" data-tipo="trasferimento">Trasferisc.</button>
+    </div>
+    <div class="form-group">
+      <div class="label">Importo (€) *</div>
+      <input type="number" id="mov-importo" placeholder="0.00" step="0.01" inputmode="decimal">
+    </div>
+    <div class="form-group">
+      <div class="label">Data *</div>
+      <input type="date" id="mov-data">
+    </div>
+    <div class="form-group">
+      <div class="label">Conto *</div>
+      <select id="mov-conto"></select>
+    </div>
+    <div class="form-group" id="mov-conto-dest-group" style="display:none">
+      <div class="label">Conto destinazione *</div>
+      <select id="mov-conto-dest"></select>
+    </div>
+    <div class="form-group">
+      <div class="label">Categoria</div>
+      <select id="mov-categoria"></select>
+    </div>
+    <div class="form-group">
+      <div class="label">Descrizione</div>
+      <input type="text" id="mov-descrizione" placeholder="es. CONAD, Stipendio...">
+    </div>
+    <div class="form-actions">
+      <button class="btn btn-ghost" id="btn-cancel-movimento">Annulla</button>
+      <button class="btn btn-primary" id="btn-save-movimento">Salva</button>
+    </div>
+  </div>
+</div>
+
+<style>
+.color-dot {
+  width: 28px; height: 28px;
+  border-radius: 50%;
+  border: 3px solid transparent;
+  cursor: pointer;
+  transition: transform 0.15s;
+}
+.color-dot.active { border-color: var(--text); transform: scale(1.15); }
+.conto-card {
+  border-radius: var(--radius);
+  padding: 16px;
+  margin-bottom: 10px;
+  color: white;
+  position: relative;
+}
+.conto-card-name  { font-size: 0.8rem; opacity: 0.85; font-weight: 500; }
+.conto-card-banca { font-size: 0.72rem; opacity: 0.7; margin-top: 2px; }
+.conto-card-saldo { font-size: 1.5rem; font-weight: 700; margin-top: 8px; }
+.conto-card-iban  { font-size: 0.68rem; opacity: 0.6; margin-top: 4px; font-family: monospace; }
+.conto-card-actions {
+  position: absolute; top: 12px; right: 12px;
+  display: flex; gap: 6px;
+}
+.conto-card-actions button {
+  width: 28px; height: 28px;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.2);
+  display: flex; align-items: center; justify-content: center;
+  color: white;
+}
+.conto-card-actions button svg { width: 14px; height: 14px; }
+</style>
