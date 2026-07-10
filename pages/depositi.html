@@ -1,2 +1,239 @@
-<!-- Contenuto caricato dal modulo js/modules/depositi.js -->
-<div class="spinner"></div>
+<!-- Conti Deposito -->
+<div id="depositi-root">
+  <div class="spinner"></div>
+</div>
+
+<!-- Modal: aggiungi/modifica conto deposito -->
+<div id="modal-deposito" class="modal-overlay hidden">
+  <div class="modal">
+    <div class="modal-header">
+      <h2 class="modal-title" id="modal-dep-title">Nuovo conto deposito</h2>
+      <button class="modal-close" onclick="closeDepModal('modal-deposito')">
+        <i data-lucide="x"></i>
+      </button>
+    </div>
+    <div class="form-group">
+      <div class="label">Nome *</div>
+      <input type="text" id="dep-nome" placeholder="es. CA Bank Deposito">
+    </div>
+    <div class="form-group">
+      <div class="label">Banca *</div>
+      <input type="text" id="dep-banca" placeholder="es. CA Bank">
+    </div>
+    <div class="form-group">
+      <div class="label">Somma libera (€)</div>
+      <input type="number" id="dep-libera" placeholder="0.00" step="0.01" inputmode="decimal">
+    </div>
+    <div class="form-group">
+      <div class="label">Note</div>
+      <input type="text" id="dep-note" placeholder="Opzionale">
+    </div>
+    <div class="form-actions">
+      <button class="btn btn-ghost" onclick="closeDepModal('modal-deposito')">Annulla</button>
+      <button class="btn btn-primary" id="btn-save-deposito">Salva</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: aggiungi/modifica vincolo -->
+<div id="modal-vincolo" class="modal-overlay hidden">
+  <div class="modal">
+    <div class="modal-header">
+      <h2 class="modal-title" id="modal-vinc-title">Nuovo vincolo</h2>
+      <button class="modal-close" onclick="closeDepModal('modal-vincolo')">
+        <i data-lucide="x"></i>
+      </button>
+    </div>
+    <div class="form-group">
+      <div class="label">N° operazione</div>
+      <input type="text" id="vinc-numero" placeholder="es. 2026001">
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <div class="label">Data decorrenza</div>
+        <input type="date" id="vinc-decorrenza">
+      </div>
+      <div class="form-group">
+        <div class="label">Data scadenza</div>
+        <input type="date" id="vinc-scadenza">
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <div class="label">Importo (€) *</div>
+        <input type="number" id="vinc-importo" placeholder="0.00" step="0.01" inputmode="decimal">
+      </div>
+      <div class="form-group">
+        <div class="label">Tasso lordo (%)</div>
+        <input type="number" id="vinc-tasso" placeholder="es. 2.50" step="0.01" inputmode="decimal">
+      </div>
+    </div>
+    <div class="form-group">
+      <div class="label">Interessi netti attesi (€)</div>
+      <input type="number" id="vinc-interessi" placeholder="0.00" step="0.01" inputmode="decimal">
+    </div>
+    <div class="form-group">
+      <div class="label">Svincolabile anticipatamente?</div>
+      <select id="vinc-svincolabile">
+        <option value="1">Sì — svincolabile</option>
+        <option value="0">No — non svincolabile</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <div class="label">Conto deposito</div>
+      <select id="vinc-deposito-id"></select>
+    </div>
+    <div class="form-actions">
+      <button class="btn btn-ghost" onclick="closeDepModal('modal-vincolo')">Annulla</button>
+      <button class="btn btn-primary" id="btn-save-vincolo">Salva</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: registra cedola -->
+<div id="modal-cedola" class="modal-overlay hidden">
+  <div class="modal">
+    <div class="modal-header">
+      <h2 class="modal-title">Registra cedola / interesse</h2>
+      <button class="modal-close" onclick="closeDepModal('modal-cedola')">
+        <i data-lucide="x"></i>
+      </button>
+    </div>
+    <div class="form-group">
+      <div class="label">Data incasso</div>
+      <input type="date" id="ced-data">
+    </div>
+    <div class="form-group">
+      <div class="label">Importo lordo (€)</div>
+      <input type="number" id="ced-lordo" placeholder="0.00" step="0.01" inputmode="decimal">
+    </div>
+    <div id="ced-calcolo" style="background:var(--bg);border-radius:var(--radius-sm);
+         padding:10px 12px;margin-bottom:14px;font-size:0.85rem;display:none">
+      <div style="display:flex;justify-content:space-between">
+        <span style="color:var(--text-muted)">Ritenuta 26%</span>
+        <span id="ced-ritenuta-val" style="color:var(--red)"></span>
+      </div>
+      <div style="display:flex;justify-content:space-between;margin-top:4px;font-weight:700">
+        <span>Netto incassato</span>
+        <span id="ced-netto-val" style="color:var(--green)"></span>
+      </div>
+    </div>
+    <div class="form-group">
+      <div class="label">Destinazione</div>
+      <input type="text" id="ced-destinazione" placeholder="es. PAC ETF, Conto UniCredit">
+    </div>
+    <div class="form-group">
+      <div class="label">Già incassata?</div>
+      <select id="ced-incassata">
+        <option value="1">Sì</option>
+        <option value="0">No — in attesa</option>
+      </select>
+    </div>
+    <div class="form-actions">
+      <button class="btn btn-ghost" onclick="closeDepModal('modal-cedola')">Annulla</button>
+      <button class="btn btn-primary" id="btn-save-cedola">Salva</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal simulatore -->
+<div id="modal-simulatore" class="modal-overlay hidden">
+  <div class="modal">
+    <div class="modal-header">
+      <h2 class="modal-title">Simulatore rendimento</h2>
+      <button class="modal-close" onclick="closeDepModal('modal-simulatore')">
+        <i data-lucide="x"></i>
+      </button>
+    </div>
+    <div class="form-group">
+      <div class="label">Conto deposito</div>
+      <select id="sim-deposito"></select>
+    </div>
+    <div class="form-group">
+      <div class="label">Importo aggiuntivo (€)</div>
+      <input type="number" id="sim-importo" placeholder="es. 1000" step="100" inputmode="decimal">
+    </div>
+    <div class="form-group">
+      <div class="label">Tasso lordo (%)</div>
+      <input type="number" id="sim-tasso" placeholder="es. 2.50" step="0.01" inputmode="decimal">
+    </div>
+    <div class="form-group">
+      <div class="label">Durata (mesi)</div>
+      <input type="number" id="sim-mesi" placeholder="es. 6" step="1" inputmode="numeric">
+    </div>
+    <button class="btn btn-primary btn-full mt-8" id="btn-calcola-sim">Calcola</button>
+    <div id="sim-risultato" style="margin-top:16px;display:none">
+      <div class="card" style="background:var(--green-light);border-color:var(--green)">
+        <div style="font-size:0.82rem;color:var(--green);font-weight:600;margin-bottom:8px">
+          RISULTATO SIMULAZIONE
+        </div>
+        <div style="display:flex;justify-content:space-between;margin-bottom:4px">
+          <span style="font-size:0.85rem">Interesse lordo</span>
+          <span id="sim-lordo" style="font-weight:700"></span>
+        </div>
+        <div style="display:flex;justify-content:space-between;margin-bottom:4px">
+          <span style="font-size:0.85rem">Ritenuta 26%</span>
+          <span id="sim-rit" style="color:var(--red)"></span>
+        </div>
+        <div style="display:flex;justify-content:space-between;padding-top:8px;
+             border-top:1px solid var(--green);margin-top:4px">
+          <span style="font-size:0.95rem;font-weight:700">Netto incassato</span>
+          <span id="sim-netto" style="font-size:1.1rem;font-weight:700;color:var(--green)"></span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<style>
+.dep-card {
+  background:var(--bg-card);
+  border:1px solid var(--border);
+  border-radius:var(--radius);
+  margin-bottom:12px;
+  overflow:hidden;
+}
+.dep-card-header {
+  padding:14px 16px;
+  display:flex;
+  justify-content:space-between;
+  align-items:flex-start;
+}
+.dep-card-left .dep-nome { font-size:1rem;font-weight:700 }
+.dep-card-left .dep-banca { font-size:0.8rem;color:var(--text-muted);margin-top:2px }
+.dep-card-right { text-align:right }
+.dep-totale { font-size:1.2rem;font-weight:700;color:var(--blue) }
+.dep-libera { font-size:0.75rem;color:var(--text-muted);margin-top:2px }
+.dep-actions { display:flex;gap:6px;margin-top:6px;justify-content:flex-end }
+.dep-actions button {
+  font-size:0.75rem;padding:4px 10px;border-radius:20px;
+  border:1px solid var(--border);background:var(--bg);
+  color:var(--text-sub);cursor:pointer;
+}
+.vincolo-row {
+  padding:10px 16px;
+  border-top:1px solid var(--border);
+  display:grid;
+  grid-template-columns:1fr auto;
+  gap:8px;
+  align-items:center;
+}
+.vincolo-row:hover { background:var(--bg) }
+.vinc-numero { font-size:0.75rem;color:var(--text-muted);font-family:monospace }
+.vinc-info { font-size:0.82rem;margin-top:2px }
+.vinc-scad { font-size:0.75rem;color:var(--text-muted);margin-top:2px }
+.vinc-importo { font-size:0.95rem;font-weight:700;text-align:right }
+.vinc-interessi { font-size:0.75rem;color:var(--green);text-align:right;margin-top:2px }
+.vinc-badge {
+  display:inline-block;font-size:0.65rem;padding:1px 6px;
+  border-radius:10px;margin-left:4px;vertical-align:middle;
+}
+.vinc-add-row {
+  padding:10px 16px;border-top:1px solid var(--border);
+  display:flex;gap:12px;
+}
+.vinc-add-row button {
+  font-size:0.8rem;color:var(--blue);font-weight:600;cursor:pointer;
+  display:flex;align-items:center;gap:4px;
+}
+</style>
