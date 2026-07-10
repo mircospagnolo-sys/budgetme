@@ -1,2 +1,185 @@
-<!-- Contenuto caricato dal modulo js/modules/budget.js -->
-<div class="spinner"></div>
+<!-- Budget -->
+<div class="tabs" id="budget-tabs">
+  <button class="tab-btn active" data-tab="mese">Mese</button>
+  <button class="tab-btn" data-tab="gestione">Gestione voci</button>
+</div>
+<div id="budget-root"></div>
+
+<!-- Modal: registra importo voce -->
+<div id="modal-reg" class="modal-overlay hidden">
+  <div class="modal">
+    <div class="modal-header">
+      <h2 class="modal-title" id="modal-reg-title">Registra importo</h2>
+      <button class="modal-close" onclick="closeBudgetModal('modal-reg')">
+        <i data-lucide="x"></i>
+      </button>
+    </div>
+    <div class="form-group">
+      <div class="label">Importo effettivo (€)</div>
+      <input type="number" id="reg-importo" placeholder="0.00" step="0.01" inputmode="decimal">
+    </div>
+    <div class="form-group">
+      <div class="label">Previsione mese (€) <span style="color:var(--text-muted);font-size:0.75rem">— opzionale, sovrascrive il default</span></div>
+      <input type="number" id="reg-previsione" placeholder="lascia vuoto per usare il default" step="0.01" inputmode="decimal">
+    </div>
+    <div class="form-group">
+      <div class="label">Note</div>
+      <input type="text" id="reg-note" placeholder="Opzionale">
+    </div>
+    <div class="form-actions">
+      <button class="btn btn-ghost" onclick="closeBudgetModal('modal-reg')">Annulla</button>
+      <button class="btn btn-primary" id="btn-save-reg">Salva</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: aggiungi/modifica categoria -->
+<div id="modal-cat" class="modal-overlay hidden">
+  <div class="modal">
+    <div class="modal-header">
+      <h2 class="modal-title" id="modal-cat-title">Nuova categoria</h2>
+      <button class="modal-close" onclick="closeBudgetModal('modal-cat')">
+        <i data-lucide="x"></i>
+      </button>
+    </div>
+    <div class="form-group">
+      <div class="label">Nome categoria *</div>
+      <input type="text" id="cat-nome" placeholder="es. Spese per il cane">
+    </div>
+    <div class="form-group">
+      <div class="label">Tipo *</div>
+      <select id="cat-tipo">
+        <option value="uscita">Uscita</option>
+        <option value="entrata">Entrata</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <div class="label">Colore</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap" id="cat-color-picker">
+        <button class="color-dot active" data-color="#2a78d6" style="background:#2a78d6"></button>
+        <button class="color-dot" data-color="#1baf7a" style="background:#1baf7a"></button>
+        <button class="color-dot" data-color="#7c3d9e" style="background:#7c3d9e"></button>
+        <button class="color-dot" data-color="#d4720f" style="background:#d4720f"></button>
+        <button class="color-dot" data-color="#e34948" style="background:#e34948"></button>
+        <button class="color-dot" data-color="#444441" style="background:#444441"></button>
+      </div>
+    </div>
+    <div class="form-actions">
+      <button class="btn btn-ghost" onclick="closeBudgetModal('modal-cat')">Annulla</button>
+      <button class="btn btn-primary" id="btn-save-cat">Salva</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: aggiungi/modifica voce -->
+<div id="modal-voce" class="modal-overlay hidden">
+  <div class="modal">
+    <div class="modal-header">
+      <h2 class="modal-title" id="modal-voce-title">Nuova voce</h2>
+      <button class="modal-close" onclick="closeBudgetModal('modal-voce')">
+        <i data-lucide="x"></i>
+      </button>
+    </div>
+    <div class="form-group">
+      <div class="label">Nome voce *</div>
+      <input type="text" id="voce-nome" placeholder="es. Canone BPER">
+    </div>
+    <div class="form-group">
+      <div class="label">Previsione mensile (€)</div>
+      <input type="number" id="voce-previsione" placeholder="0.00" step="0.01" inputmode="decimal">
+    </div>
+    <div class="form-group">
+      <div class="label">Tipo voce</div>
+      <select id="voce-tipo">
+        <option value="fisso">Fisso — importo stabile ogni mese</option>
+        <option value="variabile">Variabile — cambia ogni mese</option>
+        <option value="irregolare">Irregolare — non ogni mese</option>
+        <option value="risparmio">Risparmio / Investimento</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <div class="label">Categoria</div>
+      <select id="voce-categoria"></select>
+    </div>
+    <div class="form-group">
+      <div class="label">Note</div>
+      <input type="text" id="voce-note" placeholder="Opzionale">
+    </div>
+    <div class="form-actions">
+      <button class="btn btn-ghost" onclick="closeBudgetModal('modal-voce')">Annulla</button>
+      <button class="btn btn-primary" id="btn-save-voce">Salva</button>
+    </div>
+  </div>
+</div>
+
+<style>
+.color-dot {
+  width:28px;height:28px;border-radius:50%;
+  border:3px solid transparent;cursor:pointer;transition:transform 0.15s;
+}
+.color-dot.active{border-color:var(--text);transform:scale(1.15)}
+.budget-group{margin-bottom:6px}
+.budget-group-header{
+  display:flex;justify-content:space-between;align-items:center;
+  padding:10px 12px;border-radius:var(--radius-sm);
+  cursor:pointer;user-select:none;
+}
+.budget-group-header .group-name{font-size:0.8rem;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:white}
+.budget-group-header .group-total{font-size:0.9rem;font-weight:700;color:white}
+.budget-group-header .group-chevron{color:white;transition:transform 0.2s}
+.budget-group-header.collapsed .group-chevron{transform:rotate(-90deg)}
+.budget-voce-row{
+  display:grid;grid-template-columns:1fr auto auto auto;
+  align-items:center;gap:8px;
+  padding:10px 4px;border-bottom:1px solid var(--border);
+  cursor:pointer;transition:background 0.1s;
+}
+.budget-voce-row:last-child{border-bottom:none}
+.budget-voce-row:active{background:var(--bg)}
+.voce-name{font-size:0.88rem;font-weight:500}
+.voce-note{font-size:0.72rem;color:var(--text-muted)}
+.voce-prev{font-size:0.78rem;color:var(--text-muted);text-align:right;white-space:nowrap}
+.voce-real{font-size:0.95rem;font-weight:700;text-align:right;white-space:nowrap}
+.voce-saldo{font-size:0.78rem;text-align:right;white-space:nowrap}
+.saldo-pos{color:var(--green)}
+.saldo-neg{color:var(--red)}
+.saldo-zero{color:var(--text-muted)}
+
+/* Gestione voci */
+.gestione-cat{
+  background:var(--bg-card);border:1px solid var(--border);
+  border-radius:var(--radius);margin-bottom:10px;overflow:hidden;
+}
+.gestione-cat-header{
+  display:flex;justify-content:space-between;align-items:center;
+  padding:12px 14px;
+}
+.gestione-cat-name{font-size:0.9rem;font-weight:700}
+.gestione-cat-tipo{font-size:0.72rem;padding:2px 7px;border-radius:10px;font-weight:600}
+.gestione-cat-actions{display:flex;gap:6px}
+.gestione-cat-actions button{
+  width:28px;height:28px;border-radius:50%;
+  background:var(--bg);display:flex;align-items:center;justify-content:center;
+  color:var(--text-sub);
+}
+.gestione-cat-actions button svg{width:14px;height:14px}
+.gestione-voce-item{
+  display:flex;justify-content:space-between;align-items:center;
+  padding:9px 14px;border-top:1px solid var(--border);
+}
+.gestione-voce-item:hover{background:var(--bg)}
+.gestione-voce-name{font-size:0.85rem;flex:1}
+.gestione-voce-prev{font-size:0.82rem;color:var(--text-muted);margin-right:8px}
+.gestione-voce-actions{display:flex;gap:4px}
+.gestione-voce-actions button{
+  width:26px;height:26px;border-radius:50%;
+  background:var(--bg);display:flex;align-items:center;justify-content:center;
+  color:var(--text-muted);
+}
+.gestione-voce-actions button svg{width:13px;height:13px}
+.add-voce-btn{
+  display:flex;align-items:center;gap:6px;
+  padding:8px 14px;color:var(--blue);font-size:0.82rem;font-weight:600;
+  border-top:1px solid var(--border);width:100%;
+}
+</style>
