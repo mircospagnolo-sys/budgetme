@@ -1,26 +1,10 @@
-const CACHE_NAME = 'budgetme-v2';
+const CACHE_NAME = 'budgetme-v3';
 const ASSETS = [
-  '/',
-  '/index.html',
-  '/css/main.css',
-  '/css/components.css',
-  '/js/db.js',
-  '/js/router.js',
-  '/js/utils.js',
-  '/js/backup.js',
-  '/js/modules/dashboard.js',
-  '/js/modules/budget.js',
-  '/js/modules/conti.js',
-  '/js/modules/depositi.js',
-  '/js/modules/pac.js',
-  '/pages/dashboard.html',
-  '/pages/budget.html',
-  '/pages/conti.html',
-  '/pages/depositi.html',
-  '/pages/pac.html'
+  './',
+  './index.html',
+  './manifest.json'
 ];
 
-// Installazione: mette in cache tutti gli asset
 self.addEventListener('install', e => {
   e.waitUntil(
     caches.open(CACHE_NAME).then(cache => cache.addAll(ASSETS))
@@ -28,7 +12,6 @@ self.addEventListener('install', e => {
   self.skipWaiting();
 });
 
-// Attivazione: rimuove cache vecchie
 self.addEventListener('activate', e => {
   e.waitUntil(
     caches.keys().then(keys =>
@@ -38,8 +21,17 @@ self.addEventListener('activate', e => {
   self.clients.claim();
 });
 
-// Fetch: prima la cache, poi la rete
+// Strategia: network first, cache come fallback
+// I file JS/CSS vengono sempre presi dalla rete se disponibile
 self.addEventListener('fetch', e => {
+  // Per file JS e CSS: sempre dalla rete
+  if (e.request.url.match(/\.(js|css)$/)) {
+    e.respondWith(
+      fetch(e.request).catch(() => caches.match(e.request))
+    );
+    return;
+  }
+  // Per tutto il resto: cache first
   e.respondWith(
     caches.match(e.request).then(cached => cached || fetch(e.request))
   );

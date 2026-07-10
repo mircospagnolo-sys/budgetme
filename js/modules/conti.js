@@ -126,14 +126,16 @@ async function render() {
             <button onclick="event.stopPropagation();editConto(${c.id})" aria-label="Modifica"
               style="width:36px;height:36px;border-radius:50%;background:rgba(255,255,255,0.25);
                      display:flex;align-items:center;justify-content:center;color:white;
-                     cursor:pointer;border:none;position:relative;z-index:30">
-              <i data-lucide="pencil" style="width:16px;height:16px;pointer-events:none"></i>
+                     cursor:pointer;border:none;position:relative;z-index:30;
+                     font-size:15px;line-height:1">
+              ✏️
             </button>
             <button onclick="event.stopPropagation();deleteConto(${c.id})" aria-label="Elimina"
               style="width:36px;height:36px;border-radius:50%;background:rgba(255,255,255,0.25);
                      display:flex;align-items:center;justify-content:center;color:white;
-                     cursor:pointer;border:none;position:relative;z-index:30">
-              <i data-lucide="trash-2" style="width:16px;height:16px;pointer-events:none"></i>
+                     cursor:pointer;border:none;position:relative;z-index:30;
+                     font-size:15px;line-height:1">
+              🗑️
             </button>
           </div>
           <div class="conto-card-name">${c.nome}</div>
