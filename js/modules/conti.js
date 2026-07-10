@@ -25,6 +25,61 @@ let tipoMovimento   = 'uscita';
 
 // ─── RENDER PRINCIPALE ────────────────────────────────────────────────────────
 export async function init() {
+  // Ridefinisci le funzioni globali ad ogni accesso alla sezione
+  window.editConto = async (id) => {
+    editingContoId = id;
+    const c = await db.conti_correnti.get(id);
+    if (!c) return;
+    document.getElementById('modal-conto-title').textContent = 'Modifica conto';
+    document.getElementById('conto-nome').value  = c.nome;
+    document.getElementById('conto-banca').value = c.banca;
+    document.getElementById('conto-iban').value  = c.iban || '';
+    document.getElementById('conto-saldo').value = c.saldo_iniziale || 0;
+    document.getElementById('conto-note').value  = c.note || '';
+    selectedColor = c.colore || '#2a78d6';
+    document.querySelectorAll('.color-dot').forEach(b =>
+      b.classList.toggle('active', b.dataset.color === selectedColor));
+    openModal('modal-conto');
+    lucide.createIcons();
+  };
+
+  window.deleteConto = async (id) => {
+    const ok = await confirmAction('Eliminare questo conto? Verranno eliminati anche tutti i movimenti associati.');
+    if (!ok) return;
+    await db.movimenti_conto.where('conto_id').equals(id).delete();
+    await db.conti_correnti.delete(id);
+    toast('Conto eliminato');
+    await render();
+  };
+
+  window.deleteMovimento = async (id) => {
+    const ok = await confirmAction('Eliminare questo movimento?');
+    if (!ok) return;
+    await db.movimenti_conto.delete(id);
+    toast('Movimento eliminato');
+    await render();
+  };
+
+  window.showMovimenti = async (contoId, nome) => {
+    const container = document.getElementById('lista-movimenti');
+    const title = document.querySelector('.section-title:last-of-type');
+    if (title) title.textContent = `Movimenti — ${nome}`;
+    await renderMovimentiRecenti(contoId, nome);
+  };
+
+  window._nuovoConto = () => {
+    editingContoId = null;
+    document.getElementById('modal-conto-title').textContent = 'Nuovo conto';
+    ['conto-nome','conto-banca','conto-iban','conto-note'].forEach(id =>
+      (document.getElementById(id).value = ''));
+    document.getElementById('conto-saldo').value = '';
+    selectedColor = '#2a78d6';
+    document.querySelectorAll('.color-dot').forEach(b =>
+      b.classList.toggle('active', b.dataset.color === '#2a78d6'));
+    openModal('modal-conto');
+    lucide.createIcons();
+  };
+
   await render();
   lucide.createIcons();
 }
@@ -68,11 +123,17 @@ async function render() {
       contiConSaldo.map(c => `
         <div class="conto-card" style="background:${c.colore || '#2a78d6'}">
           <div class="conto-card-actions">
-            <button onclick="editConto(${c.id})" aria-label="Modifica">
-              <i data-lucide="pencil"></i>
+            <button onclick="event.stopPropagation();editConto(${c.id})" aria-label="Modifica"
+              style="width:36px;height:36px;border-radius:50%;background:rgba(255,255,255,0.25);
+                     display:flex;align-items:center;justify-content:center;color:white;
+                     cursor:pointer;border:none;position:relative;z-index:30">
+              <i data-lucide="pencil" style="width:16px;height:16px;pointer-events:none"></i>
             </button>
-            <button onclick="deleteConto(${c.id})" aria-label="Elimina">
-              <i data-lucide="trash-2"></i>
+            <button onclick="event.stopPropagation();deleteConto(${c.id})" aria-label="Elimina"
+              style="width:36px;height:36px;border-radius:50%;background:rgba(255,255,255,0.25);
+                     display:flex;align-items:center;justify-content:center;color:white;
+                     cursor:pointer;border:none;position:relative;z-index:30">
+              <i data-lucide="trash-2" style="width:16px;height:16px;pointer-events:none"></i>
             </button>
           </div>
           <div class="conto-card-name">${c.nome}</div>
@@ -258,48 +319,7 @@ async function saveMovimento() {
   await render();
 }
 
-// ─── FUNZIONI GLOBALI (chiamate da onclick inline) ────────────────────────────
-window.editConto = async (id) => {
-  editingContoId = id;
-  const c = await db.conti_correnti.get(id);
-  if (!c) return;
-  document.getElementById('modal-conto-title').textContent = 'Modifica conto';
-  document.getElementById('conto-nome').value   = c.nome;
-  document.getElementById('conto-banca').value  = c.banca;
-  document.getElementById('conto-iban').value   = c.iban || '';
-  document.getElementById('conto-saldo').value  = c.saldo_iniziale || 0;
-  document.getElementById('conto-note').value   = c.note || '';
-  selectedColor = c.colore || '#2a78d6';
-  document.querySelectorAll('.color-dot').forEach(b => {
-    b.classList.toggle('active', b.dataset.color === selectedColor);
-  });
-  openModal('modal-conto');
-  lucide.createIcons();
-};
-
-window.deleteConto = async (id) => {
-  const ok = await confirmAction('Eliminare questo conto? Verranno eliminati anche tutti i movimenti associati.');
-  if (!ok) return;
-  await db.movimenti_conto.where('conto_id').equals(id).delete();
-  await db.conti_correnti.delete(id);
-  toast('Conto eliminato');
-  await render();
-};
-
-window.deleteMovimento = async (id) => {
-  const ok = await confirmAction('Eliminare questo movimento?');
-  if (!ok) return;
-  await db.movimenti_conto.delete(id);
-  toast('Movimento eliminato');
-  await render();
-};
-
-window.showMovimenti = async (contoId, nome) => {
-  const container = document.getElementById('lista-movimenti');
-  const title = document.querySelector('.section-title:last-of-type');
-  if (title) title.textContent = `Movimenti — ${nome}`;
-  await renderMovimentiRecenti(contoId, nome);
-};
+// ─── FUNZIONI GLOBALI — definite in init() per essere sempre aggiornate
 
 // ─── FAB ─────────────────────────────────────────────────────────────────────
 function setupFAB() {
@@ -351,16 +371,3 @@ function setupFAB() {
     headerActions.prepend(btn);
   }
 }
-
-window._nuovoConto = () => {
-  editingContoId = null;
-  document.getElementById('modal-conto-title').textContent = 'Nuovo conto';
-  ['conto-nome','conto-banca','conto-iban','conto-note'].forEach(id =>
-    (document.getElementById(id).value = ''));
-  document.getElementById('conto-saldo').value = '';
-  selectedColor = '#2a78d6';
-  document.querySelectorAll('.color-dot').forEach(b =>
-    b.classList.toggle('active', b.dataset.color === '#2a78d6'));
-  openModal('modal-conto');
-  lucide.createIcons();
-};

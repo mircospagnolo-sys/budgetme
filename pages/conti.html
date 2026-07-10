@@ -1,5 +1,5 @@
 <!-- Conti Correnti -->
-<div style="display:flex;justify-content:flex-end;margin-bottom:12px"><button class="btn btn-primary btn-sm" onclick="window._nuovoConto()"><i data-lucide="plus" style="width:14px;height:14px"></i> Aggiungi conto</button></div><div id="conti-root">
+<div id="conti-root">
   <div class="spinner"></div>
 </div>
 
@@ -111,21 +111,30 @@
   margin-bottom: 10px;
   color: white;
   position: relative;
+  overflow: visible;
+  isolation: isolate;
 }
 .conto-card-name  { font-size: 0.8rem; opacity: 0.85; font-weight: 500; }
 .conto-card-banca { font-size: 0.72rem; opacity: 0.7; margin-top: 2px; }
 .conto-card-saldo { font-size: 1.5rem; font-weight: 700; margin-top: 8px; }
 .conto-card-iban  { font-size: 0.68rem; opacity: 0.6; margin-top: 4px; font-family: monospace; }
 .conto-card-actions {
-  position: absolute; top: 12px; right: 12px;
-  display: flex; gap: 6px;
+  position: absolute; top: 8px; right: 8px;
+  display: flex; gap: 4px;
+  z-index: 20;
 }
 .conto-card-actions button {
-  width: 28px; height: 28px;
+  width: 36px; height: 36px;
   border-radius: 50%;
-  background: rgba(255,255,255,0.2);
+  background: rgba(255,255,255,0.25);
   display: flex; align-items: center; justify-content: center;
   color: white;
+  cursor: pointer;
+  position: relative;
+  z-index: 10;
+  -webkit-tap-highlight-color: transparent;
 }
-.conto-card-actions button svg { width: 14px; height: 14px; }
+.conto-card-actions button:hover { background: rgba(255,255,255,0.4); }
+.conto-card-actions button:active { transform: scale(0.92); }
+.conto-card-actions button svg { width: 16px; height: 16px; pointer-events: none; }
 </style>
