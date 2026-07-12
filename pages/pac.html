@@ -1,2 +1,261 @@
-<!-- Contenuto caricato dal modulo js/modules/pac.js -->
-<div class="spinner"></div>
+<!-- Portafoglio Investimenti -->
+<div class="tabs" id="pac-tabs">
+  <button class="tab-btn active" data-tab="portafoglio">📈 Portafoglio</button>
+  <button class="tab-btn" data-tab="beni">🥇 Beni reali</button>
+</div>
+<div id="pac-root">
+  <div class="spinner"></div>
+</div>
+
+<!-- Modal: nuovo/modifica portafoglio -->
+<div id="modal-portafoglio" class="modal-overlay hidden">
+  <div class="modal">
+    <div class="modal-header">
+      <h2 class="modal-title" id="modal-pf-title">Nuovo portafoglio</h2>
+      <button class="modal-close" onclick="closePacModal('modal-portafoglio')"><i data-lucide="x"></i></button>
+    </div>
+    <div class="form-group">
+      <div class="label">Nome *</div>
+      <input type="text" id="pf-nome" placeholder="es. Trade Republic">
+    </div>
+    <div class="form-group">
+      <div class="label">Broker / Custode</div>
+      <input type="text" id="pf-broker" placeholder="es. Trade Republic, Fineco">
+    </div>
+    <div class="form-group">
+      <div class="label">Tipo</div>
+      <select id="pf-tipo">
+        <option value="broker">Broker online</option>
+        <option value="banca">Banca</option>
+        <option value="fisico">Custodia fisica</option>
+        <option value="altro">Altro</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <div class="label">Note</div>
+      <input type="text" id="pf-note" placeholder="Opzionale">
+    </div>
+    <div class="form-actions">
+      <button class="btn btn-ghost" onclick="closePacModal('modal-portafoglio')">Annulla</button>
+      <button class="btn btn-primary" id="btn-save-portafoglio">Salva</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: nuovo/modifica strumento -->
+<div id="modal-strumento" class="modal-overlay hidden">
+  <div class="modal">
+    <div class="modal-header">
+      <h2 class="modal-title" id="modal-str-title">Nuovo strumento</h2>
+      <button class="modal-close" onclick="closePacModal('modal-strumento')"><i data-lucide="x"></i></button>
+    </div>
+    <div class="form-group">
+      <div class="label">Nome *</div>
+      <input type="text" id="str-nome" placeholder="es. Vanguard FTSE All-World">
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <div class="label">Ticker</div>
+        <input type="text" id="str-ticker" placeholder="es. VWCE">
+      </div>
+      <div class="form-group">
+        <div class="label">ISIN</div>
+        <input type="text" id="str-isin" placeholder="es. IE00B3RBWM25">
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <div class="label">Tipo asset</div>
+        <select id="str-tipo">
+          <option value="etf_azionario">ETF Azionario</option>
+          <option value="etf_obbligazionario">ETF Obbligazionario</option>
+          <option value="azione">Azione</option>
+          <option value="obbligazione">Obbligazione</option>
+          <option value="fondo">Fondo comune</option>
+          <option value="materia_prima">Materia prima fisica</option>
+          <option value="crypto">Crypto</option>
+          <option value="altro_bene">Altro bene</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <div class="label">Strategia</div>
+        <select id="str-strategia">
+          <option value="pac">PAC — versamenti periodici</option>
+          <option value="pic">PIC — versamento unico</option>
+          <option value="na">N.A.</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <div class="label">Modalità</div>
+        <select id="str-modalita">
+          <option value="accumulo">Accumulo</option>
+          <option value="distribuzione">Distribuzione</option>
+          <option value="na">N.A.</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <div class="label">Valuta</div>
+        <input type="text" id="str-valuta" value="EUR" placeholder="EUR">
+      </div>
+    </div>
+    <div class="form-group">
+      <div class="label">Portafoglio</div>
+      <select id="str-portafoglio-id"></select>
+    </div>
+    <div class="form-group">
+      <div class="label">Note</div>
+      <input type="text" id="str-note" placeholder="Opzionale">
+    </div>
+    <div class="form-actions">
+      <button class="btn btn-ghost" onclick="closePacModal('modal-strumento')">Annulla</button>
+      <button class="btn btn-primary" id="btn-save-strumento">Salva</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: aggiorna valori strumento -->
+<div id="modal-aggiorna" class="modal-overlay hidden">
+  <div class="modal">
+    <div class="modal-header">
+      <h2 class="modal-title" id="modal-agg-title">Aggiorna valori</h2>
+      <button class="modal-close" onclick="closePacModal('modal-aggiorna')"><i data-lucide="x"></i></button>
+    </div>
+    <div style="background:var(--bg);border-radius:var(--radius-sm);padding:10px 12px;
+         margin-bottom:14px;font-size:0.82rem;color:var(--text-muted)">
+      Aggiorna periodicamente i valori di mercato per mantenere il patrimonio netto accurato.
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <div class="label">Quantità / Quote possedute</div>
+        <input type="number" id="agg-quantita" step="0.000001" inputmode="decimal" placeholder="0.000000">
+      </div>
+      <div class="form-group">
+        <div class="label">Prezzo attuale (€)</div>
+        <input type="number" id="agg-prezzo" step="0.01" inputmode="decimal" placeholder="0.00">
+      </div>
+    </div>
+    <div class="form-group">
+      <div class="label">Capitale investito totale (€)</div>
+      <input type="number" id="agg-investito" step="0.01" inputmode="decimal" placeholder="0.00">
+    </div>
+    <div id="agg-preview" style="display:none;margin-bottom:14px">
+      <div class="card" style="background:var(--blue-light);border-color:var(--blue)">
+        <div style="display:flex;justify-content:space-between;margin-bottom:4px">
+          <span style="font-size:0.82rem">Valore attuale</span>
+          <span id="agg-val-attuale" style="font-weight:700;color:var(--blue)"></span>
+        </div>
+        <div style="display:flex;justify-content:space-between;margin-bottom:4px">
+          <span style="font-size:0.82rem">Guadagno lordo</span>
+          <span id="agg-guadagno" style="font-weight:700"></span>
+        </div>
+        <div style="display:flex;justify-content:space-between">
+          <span style="font-size:0.82rem">Performance</span>
+          <span id="agg-perf" style="font-weight:700"></span>
+        </div>
+      </div>
+    </div>
+    <div class="form-actions">
+      <button class="btn btn-ghost" onclick="closePacModal('modal-aggiorna')">Annulla</button>
+      <button class="btn btn-primary" id="btn-save-aggiorna">Salva</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: nuovo/modifica bene reale -->
+<div id="modal-bene" class="modal-overlay hidden">
+  <div class="modal">
+    <div class="modal-header">
+      <h2 class="modal-title" id="modal-bene-title">Nuovo bene</h2>
+      <button class="modal-close" onclick="closePacModal('modal-bene')"><i data-lucide="x"></i></button>
+    </div>
+    <div class="form-group">
+      <div class="label">Descrizione *</div>
+      <input type="text" id="bene-nome" placeholder="es. Lingottino oro 2.5g, Rolex Datejust">
+    </div>
+    <div class="form-group">
+      <div class="label">Categoria</div>
+      <select id="bene-categoria">
+        <option value="oro_fisico">Oro fisico</option>
+        <option value="argento_fisico">Argento fisico</option>
+        <option value="crypto">Crypto</option>
+        <option value="orologio">Orologio</option>
+        <option value="arte">Arte / Collezionismo</option>
+        <option value="immobile">Immobile</option>
+        <option value="altro">Altro</option>
+      </select>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <div class="label">Costo acquisto (€)</div>
+        <input type="number" id="bene-acquisto" step="0.01" inputmode="decimal" placeholder="0.00">
+      </div>
+      <div class="form-group">
+        <div class="label">Valore attuale stimato (€)</div>
+        <input type="number" id="bene-attuale" step="0.01" inputmode="decimal" placeholder="0.00">
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <div class="label">Quantità / Grammi</div>
+        <input type="number" id="bene-quantita" step="0.01" inputmode="decimal" placeholder="es. 2.5">
+      </div>
+      <div class="form-group">
+        <div class="label">Unità</div>
+        <input type="text" id="bene-unita" placeholder="es. g, pz, oz">
+      </div>
+    </div>
+    <div class="form-group">
+      <div class="label">Data acquisto</div>
+      <input type="date" id="bene-data">
+    </div>
+    <div class="form-group">
+      <div class="label">Note</div>
+      <input type="text" id="bene-note" placeholder="Opzionale">
+    </div>
+    <div class="form-actions">
+      <button class="btn btn-ghost" onclick="closePacModal('modal-bene')">Annulla</button>
+      <button class="btn btn-primary" id="btn-save-bene">Salva</button>
+    </div>
+  </div>
+</div>
+
+<style>
+.pf-card {
+  background:var(--bg-card);border:1px solid var(--border);
+  border-radius:var(--radius);margin-bottom:12px;overflow:hidden;
+}
+.pf-header {
+  padding:12px 16px;background:var(--gray);color:white;
+  display:flex;justify-content:space-between;align-items:center;
+}
+.pf-header-nome { font-size:0.95rem;font-weight:700 }
+.pf-header-broker { font-size:0.75rem;opacity:0.8;margin-top:2px }
+.pf-header-totale { text-align:right }
+.pf-header-val { font-size:1.1rem;font-weight:700 }
+.pf-header-perf { font-size:0.78rem;margin-top:2px }
+.str-row {
+  padding:12px 16px;border-top:1px solid var(--border);
+  display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center;
+}
+.str-row:hover { background:var(--bg) }
+.str-nome { font-size:0.88rem;font-weight:600 }
+.str-meta { font-size:0.72rem;color:var(--text-muted);margin-top:2px }
+.str-badges { display:flex;gap:4px;margin-top:4px;flex-wrap:wrap }
+.str-val { font-size:1rem;font-weight:700;text-align:right }
+.str-perf { font-size:0.78rem;text-align:right;margin-top:2px }
+.str-actions { display:flex;gap:4px;margin-top:6px;justify-content:flex-end }
+.str-actions button {
+  font-size:0.72rem;padding:3px 8px;border-radius:12px;
+  border:1px solid var(--border);background:var(--bg);cursor:pointer;
+}
+.tipo-badge {
+  font-size:0.65rem;padding:2px 6px;border-radius:10px;font-weight:600;
+}
+.bene-row {
+  padding:12px 16px;border-top:1px solid var(--border);
+  display:flex;justify-content:space-between;align-items:center;
+}
+.bene-row:hover { background:var(--bg) }
+</style>

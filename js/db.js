@@ -146,6 +146,31 @@ export async function ensureDefaultCategorie() {
 }
 
 // ── HELPERS ───────────────────────────────────────────────────────────────────
+// ── VERSIONE 4: aggiunge portafoglio investimenti ─────────────────────────
+db.version(4).stores({
+  mesi:                   '++id, anno, mese',
+  voci_uscita:            '++id, mese_id, categoria, conto_id',
+  voci_entrata:           '++id, mese_id, categoria, conto_id',
+  accantonamenti:         '++id, voce',
+  crediti_sospeso:        '++id, stato, mese_id',
+  cedole_budget:          '++id, mese_id, incassata',
+  conti_correnti:         '++id, nome, attivo',
+  movimenti_conto:        '++id, conto_id, data, tipo',
+  conti_deposito:         '++id, banca, stato',
+  vincoli_deposito:       '++id, deposito_id, stato, data_scadenza',
+  cedole_deposito:        '++id, deposito_id, vincolo_id, incassata, data_incasso',
+  pac_etf:                '++id, nome, broker, attivo',
+  pac_versamenti:         '++id, pac_id, anno, mese',
+  categorie_budget:       '++id, tipo, ordine, attiva',
+  voci_budget:            '++id, categoria_id, ordine, attiva',
+  registrazioni:          '++id, voce_id, mese_id, [voce_id+mese_id]',
+  // NUOVE v4
+  portafogli:             '++id, nome, attivo',
+  strumenti_portafoglio:  '++id, portafoglio_id, tipo_asset, attivo',
+  movimenti_portafoglio:  '++id, strumento_id, data, tipo_movimento',
+  beni_reali:             '++id, categoria, attivo'
+});
+
 // ── VERSIONE 3: aggiunge vincoli_deposito ────────────────────────────────────
 db.version(3).stores({
   mesi:               '++id, anno, mese',

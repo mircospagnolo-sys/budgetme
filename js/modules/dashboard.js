@@ -23,10 +23,12 @@ export async function init() {
       <div class="card" style="background:var(--blue);border:none;margin-bottom:16px">
         <div class="card-title" style="color:rgba(255,255,255,0.75)">PATRIMONIO NETTO</div>
         <div class="card-value large" style="color:#fff">${formatEur(patrimonio.totale)}</div>
-        <div style="display:flex;gap:16px;margin-top:12px;font-size:0.78rem;color:rgba(255,255,255,0.8)">
+        <div style="display:flex;gap:12px;margin-top:12px;font-size:0.78rem;
+               color:rgba(255,255,255,0.85);flex-wrap:wrap">
           <span>🏦 C/C ${formatEur(patrimonio.cc)}</span>
           <span>🏛 Dep. ${formatEur(patrimonio.dep)}</span>
-          <span>📈 PAC ${formatEur(patrimonio.pac)}</span>
+          <span>📈 Portaf. ${formatEur(patrimonio.pac)}</span>
+          ${patrimonio.beni > 0 ? `<span>🥇 Beni ${formatEur(patrimonio.beni)}</span>` : ''}
         </div>
       </div>
 

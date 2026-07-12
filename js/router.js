@@ -8,7 +8,7 @@ const routes = {
   budget:    { page: 'pages/budget.html',    module: 'js/modules/budget.js',    label: 'Budget' },
   conti:     { page: 'pages/conti.html',     module: 'js/modules/conti.js',     label: 'Conti' },
   depositi:  { page: 'pages/depositi.html',  module: 'js/modules/depositi.js',  label: 'Depositi' },
-  pac:       { page: 'pages/pac.html',       module: 'js/modules/pac.js',       label: 'PAC' }
+  pac:       { page: 'pages/pac.html',       module: 'js/modules/pac.js',       label: 'Investimenti' }
 };
 
 let currentRoute = null;
