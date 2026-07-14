@@ -1,27 +1,6 @@
-const CACHE_NAME = 'budgetme-v2';
+const CACHE_NAME = 'budgetme-v4';
+const ASSETS = ['./', './index.html', './manifest.json'];
 
-const ASSETS = [
-  '/',
-  '/index.html',
-  '/css/main.css',
-  '/css/components.css',
-  '/js/db.js',
-  '/js/router.js',
-  '/js/utils.js',
-  '/js/backup.js',
-  '/js/modules/dashboard.js',
-  '/js/modules/budget.js',
-  '/js/modules/conti.js',
-  '/js/modules/depositi.js',
-  '/js/modules/pac.js',
-  '/pages/dashboard.html',
-  '/pages/budget.html',
-  '/pages/conti.html',
-  '/pages/depositi.html',
-  '/pages/pac.html'
-];
-
-// Installazione: mette in cache tutti gli asset
 self.addEventListener('install', e => {
   e.waitUntil(
     caches.open(CACHE_NAME).then(cache => cache.addAll(ASSETS))
@@ -29,7 +8,6 @@ self.addEventListener('install', e => {
   self.skipWaiting();
 });
 
-// Attivazione: rimuove cache vecchie
 self.addEventListener('activate', e => {
   e.waitUntil(
     caches.keys().then(keys =>
@@ -39,8 +17,20 @@ self.addEventListener('activate', e => {
   self.clients.claim();
 });
 
-// Fetch: prima la cache, poi la rete
+// Network-first per JS/CSS, cache-first per il resto
 self.addEventListener('fetch', e => {
+  if (e.request.url.match(/\.(js|css)$/)) {
+    e.respondWith(fetch(e.request).catch(() => caches.match(e.request)));
+    return;
+  }
+  // Firebase e CDN: sempre dalla rete
+  if (e.request.url.includes('firebase') ||
+      e.request.url.includes('gstatic') ||
+      e.request.url.includes('unpkg') ||
+      e.request.url.includes('cdnjs')) {
+    e.respondWith(fetch(e.request).catch(() => caches.match(e.request)));
+    return;
+  }
   e.respondWith(
     caches.match(e.request).then(cached => cached || fetch(e.request))
   );

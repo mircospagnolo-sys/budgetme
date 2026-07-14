@@ -3,6 +3,13 @@
    Database IndexedDB via Dexie.js
    ============================================ */
 
+async function triggerAutoSync() {
+  try {
+    const { scheduleSync } = await import('./sync.js');
+    scheduleSync();
+  } catch(e) {}
+}
+
 const db = new Dexie('BudgetMeDB');
 
 db.version(1).stores({
@@ -189,6 +196,25 @@ db.version(3).stores({
   categorie_budget:   '++id, tipo, ordine, attiva',
   voci_budget:        '++id, categoria_id, ordine, attiva',
   registrazioni:      '++id, voce_id, mese_id, [voce_id+mese_id]'
+});
+
+function patchTableForSync(table) {
+  const origAdd    = table.add.bind(table);
+  const origPut    = table.put.bind(table);
+  const origUpdate = table.update.bind(table);
+  const origDelete = table.delete.bind(table);
+  table.add    = async (...a) => { const r = await origAdd(...a);    triggerAutoSync(); return r; };
+  table.put    = async (...a) => { const r = await origPut(...a);    triggerAutoSync(); return r; };
+  table.update = async (...a) => { const r = await origUpdate(...a); triggerAutoSync(); return r; };
+  table.delete = async (...a) => { const r = await origDelete(...a); triggerAutoSync(); return r; };
+}
+
+db.on('ready', () => {
+  ['mesi','voci_uscita','voci_entrata','accantonamenti','crediti_sospeso',
+   'cedole_budget','conti_correnti','movimenti_conto','conti_deposito','vincoli_deposito',
+   'cedole_deposito','pac_etf','pac_versamenti','categorie_budget','voci_budget',
+   'registrazioni','portafogli','strumenti_portafoglio','movimenti_portafoglio','beni_reali']
+  .forEach(t => { if (db[t]) patchTableForSync(db[t]); });
 });
 
 export async function getOrCreateMeseCorrente() {

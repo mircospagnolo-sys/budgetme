@@ -9,89 +9,215 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="apple-mobile-web-app-title" content="BudgetMe">
   <title>BudgetMe</title>
-
-  <!-- PWA Manifest -->
   <link rel="manifest" href="manifest.json">
   <link rel="icon" type="image/svg+xml" href="icons/icon.svg">
-
-  <!-- Stili -->
   <link rel="stylesheet" href="css/main.css">
   <link rel="stylesheet" href="css/components.css">
 
-  <!-- Dexie.js (IndexedDB) -->
+  <!-- Dexie.js -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/dexie/3.2.4/dexie.min.js"></script>
-
   <!-- Chart.js -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
-
   <!-- Lucide Icons -->
   <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
+
+  <!-- Firebase SDK -->
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+
+  <style>
+    /* ── Modal sync/login ── */
+    #sync-modal-overlay {
+      position:fixed;inset:0;background:rgba(0,0,0,0.55);
+      z-index:500;display:flex;align-items:flex-end;
+      opacity:0;transition:opacity 0.2s;
+    }
+    #sync-modal-overlay.open{opacity:1}
+    #sync-modal {
+      background:var(--bg-card);border-radius:var(--radius) var(--radius) 0 0;
+      padding:24px 16px 36px;width:100%;max-height:90dvh;overflow-y:auto;
+      transform:translateY(100%);transition:transform 0.25s ease;
+    }
+    #sync-modal-overlay.open #sync-modal{transform:translateY(0)}
+    .sync-step{display:none}
+    .sync-step.active{display:block}
+    .google-btn {
+      display:flex;align-items:center;justify-content:center;gap:10px;
+      width:100%;padding:13px;border-radius:var(--radius-sm);
+      background:white;color:#3c4043;font-size:0.95rem;font-weight:600;
+      border:1px solid #dadce0;cursor:pointer;margin-top:12px;
+      box-shadow:0 1px 3px rgba(0,0,0,0.12);
+      transition:box-shadow 0.15s;
+    }
+    .google-btn:hover{box-shadow:0 2px 8px rgba(0,0,0,0.2)}
+    .google-btn img{width:20px;height:20px}
+    .enc-info {
+      background:var(--blue-light);border-radius:var(--radius-sm);
+      padding:10px 12px;font-size:0.82rem;color:var(--blue);margin:12px 0;
+    }
+    .sync-status-bar {
+      display:flex;align-items:center;justify-content:space-between;
+      padding:6px 12px;background:var(--bg);
+      border-bottom:1px solid var(--border);font-size:0.75rem;
+    }
+    #btn-sync-status{
+      font-size:0.75rem;cursor:pointer;font-family:inherit;
+      background:none;border:none;color:var(--text-muted);padding:2px 6px;
+    }
+  </style>
 </head>
 <body>
-
 <div id="app">
 
   <!-- Header fisso -->
   <header id="header">
     <h1 id="page-title">Dashboard</h1>
-    <div id="header-actions">
-      <!-- Pulsante impostazioni/backup -->
+    <div id="header-actions" style="display:flex;gap:6px;align-items:center">
+      <!-- Stato sync -->
+      <button id="btn-sync-status" onclick="openSyncModal()" title="Sincronizzazione">
+        ☁ Accedi
+      </button>
+      <!-- Impostazioni -->
       <button id="btn-settings" aria-label="Impostazioni" onclick="openSettings()">
         <i data-lucide="settings" style="width:22px;height:22px;color:var(--text-sub)"></i>
       </button>
     </div>
   </header>
 
-  <!-- Contenuto principale (iniettato dal router) -->
-  <main id="content">
-    <div class="spinner"></div>
-  </main>
+  <!-- Contenuto principale -->
+  <main id="content"><div class="spinner"></div></main>
 
-  <!-- Navbar fissa in basso -->
+  <!-- Navbar -->
   <nav id="navbar" role="navigation" aria-label="Navigazione principale">
     <button class="nav-item active" data-route="dashboard" aria-label="Dashboard">
-      <i data-lucide="layout-dashboard"></i>
-      <span>Home</span>
+      <i data-lucide="layout-dashboard"></i><span>Home</span>
     </button>
     <button class="nav-item" data-route="budget" aria-label="Budget">
-      <i data-lucide="receipt"></i>
-      <span>Budget</span>
+      <i data-lucide="receipt"></i><span>Budget</span>
     </button>
     <button class="nav-item" data-route="conti" aria-label="Conti correnti">
-      <i data-lucide="landmark"></i>
-      <span>Conti</span>
+      <i data-lucide="landmark"></i><span>Conti</span>
     </button>
     <button class="nav-item" data-route="depositi" aria-label="Conti deposito">
-      <i data-lucide="piggy-bank"></i>
-      <span>Depositi</span>
+      <i data-lucide="piggy-bank"></i><span>Depositi</span>
     </button>
-    <button class="nav-item" data-route="pac" aria-label="Portafoglio Investimenti">
-      <i data-lucide="trending-up"></i>
-      <span>Invest.</span>
+    <button class="nav-item" data-route="pac" aria-label="Investimenti">
+      <i data-lucide="trending-up"></i><span>Invest.</span>
     </button>
   </nav>
-
 </div>
 
 <!-- Toast container -->
 <div id="toast-container" aria-live="polite"></div>
 
-<!-- Modal impostazioni / backup -->
+<!-- ── MODAL SYNC / LOGIN ──────────────────────────────────────────────── -->
+<div id="sync-modal-overlay" style="display:none" onclick="if(event.target===this)closeSyncModal()">
+  <div id="sync-modal">
+
+    <!-- STEP 1: non loggato -->
+    <div class="sync-step active" id="step-login">
+      <h2 style="font-size:1.1rem;font-weight:700;margin-bottom:4px">☁ Sincronizzazione cloud</h2>
+      <p style="font-size:0.85rem;color:var(--text-muted);margin-bottom:12px">
+        Accedi per sincronizzare i tuoi dati tra tutti i dispositivi.
+      </p>
+      <div class="enc-info">
+        🔒 I tuoi dati vengono cifrati sul dispositivo con AES-256 prima di essere caricati.
+        Nessuno — incluso Google — può leggerli senza la tua password di cifratura.
+      </div>
+      <button class="google-btn" onclick="doGoogleLogin()">
+        <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google">
+        Accedi con Google
+      </button>
+      <button class="btn btn-ghost btn-full mt-8" onclick="closeSyncModal()">Continua senza sync</button>
+    </div>
+
+    <!-- STEP 2: loggato, prima volta → imposta password cifratura -->
+    <div class="sync-step" id="step-setup">
+      <h2 style="font-size:1.1rem;font-weight:700;margin-bottom:4px">🔑 Imposta password di cifratura</h2>
+      <p id="setup-user-email" style="font-size:0.82rem;color:var(--text-muted);margin-bottom:12px"></p>
+      <div class="enc-info">
+        Questa password cifra i tuoi dati prima del caricamento. È diversa dalla password Google.
+        <strong>Conservala bene — se la perdi, i dati cloud non sono recuperabili.</strong>
+      </div>
+      <div class="form-group mt-8">
+        <div class="label">Password di cifratura *</div>
+        <input type="password" id="enc-pwd-new" placeholder="Minimo 8 caratteri"
+               style="font-size:1rem" autocomplete="new-password">
+      </div>
+      <div class="form-group">
+        <div class="label">Conferma password *</div>
+        <input type="password" id="enc-pwd-confirm" placeholder="Ripeti la password"
+               style="font-size:1rem" autocomplete="new-password">
+      </div>
+      <p id="setup-error" style="color:var(--red);font-size:0.82rem;display:none"></p>
+      <div class="form-actions mt-8">
+        <button class="btn btn-ghost" onclick="doLogout()">Esci</button>
+        <button class="btn btn-primary" onclick="doSetupEncryption()">Configura e sincronizza</button>
+      </div>
+    </div>
+
+    <!-- STEP 3: loggato, ritorno → inserisci password cifratura -->
+    <div class="sync-step" id="step-unlock">
+      <h2 style="font-size:1.1rem;font-weight:700;margin-bottom:4px">🔑 Sblocca sincronizzazione</h2>
+      <p id="unlock-user-email" style="font-size:0.82rem;color:var(--text-muted);margin-bottom:12px"></p>
+      <div class="form-group mt-8">
+        <div class="label">Password di cifratura</div>
+        <input type="password" id="enc-pwd-unlock" placeholder="La tua password di cifratura"
+               style="font-size:1rem" autocomplete="current-password"
+               onkeydown="if(event.key==='Enter')doUnlock()">
+      </div>
+      <p id="unlock-error" style="color:var(--red);font-size:0.82rem;display:none"></p>
+      <div class="form-actions mt-8">
+        <button class="btn btn-ghost" onclick="doLogout()">Cambia account</button>
+        <button class="btn btn-primary" onclick="doUnlock()">Sblocca</button>
+      </div>
+      <p style="margin-top:12px;font-size:0.78rem;text-align:center;color:var(--text-muted)">
+        Prima volta su questo account?
+        <button onclick="forceShowSetup()"
+          style="color:var(--blue);text-decoration:underline;background:none;
+                 border:none;cursor:pointer;font-size:0.78rem">
+          Configura nuova cifratura
+        </button>
+      </p>
+    </div>
+
+    <!-- STEP 4: sincronizzazione attiva -->
+    <div class="sync-step" id="step-synced">
+      <h2 style="font-size:1.1rem;font-weight:700;margin-bottom:4px">✓ Sincronizzazione attiva</h2>
+      <p id="synced-user-email" style="font-size:0.82rem;color:var(--text-muted);margin-bottom:12px"></p>
+      <div style="background:var(--green-light);border-radius:var(--radius-sm);
+           padding:10px 12px;font-size:0.82rem;color:var(--green);margin-bottom:16px">
+        I dati vengono sincronizzati automaticamente ogni 30 secondi dopo ogni modifica.
+        Tutti i tuoi dispositivi restano aggiornati.
+      </div>
+      <div class="form-group">
+        <div class="label">Ultima sincronizzazione</div>
+        <div id="last-sync-time" style="font-size:0.9rem;font-weight:600"></div>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:16px;flex-wrap:wrap">
+        <button class="btn btn-primary btn-sm" onclick="doManualSync()">↻ Sincronizza ora</button>
+        <button class="btn btn-ghost btn-sm" onclick="doLogout()">Disconnetti</button>
+        <button class="btn btn-ghost btn-sm" onclick="closeSyncModal()">Chiudi</button>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ── MODAL IMPOSTAZIONI ────────────────────────────────────────────────── -->
 <div id="modal-settings" class="modal-overlay hidden">
-  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+  <div class="modal" role="dialog" aria-modal="true">
     <div class="modal-header">
-      <h2 class="modal-title" id="settings-title">Impostazioni</h2>
+      <h2 class="modal-title">Impostazioni</h2>
       <button class="modal-close" onclick="closeSettings()" aria-label="Chiudi">
         <i data-lucide="x"></i>
       </button>
     </div>
-
-    <p class="section-title">Backup dati</p>
-    <div id="backup-reminder" class="hidden" style="
-      background:var(--orange-light); color:var(--orange);
-      border-radius:var(--radius-sm); padding:10px 12px;
-      font-size:0.82rem; margin-bottom:12px;
-    ">
+    <p class="section-title">Backup locale</p>
+    <div id="backup-reminder" class="hidden"
+         style="background:var(--orange-light);color:var(--orange);border-radius:var(--radius-sm);
+                padding:10px 12px;font-size:0.82rem;margin-bottom:12px">
       ⚠️ Non hai ancora scaricato un backup questo mese.
     </div>
     <button class="btn btn-primary btn-full" id="btn-export">
@@ -101,64 +227,167 @@
     <button class="btn btn-ghost btn-full" id="btn-import">
       <i data-lucide="upload"></i> Ripristina da backup
     </button>
-
     <p class="section-title mt-24">Info app</p>
-    <div class="card" style="font-size:0.82rem; color:var(--text-sub)">
+    <div class="card" style="font-size:0.82rem;color:var(--text-sub)">
       <p><strong>BudgetMe</strong> v1.0</p>
-      <p class="mt-8">Tutti i dati sono salvati sul dispositivo.</p>
-      <p>Nessun server, nessun account.</p>
+      <p class="mt-8">Dati salvati sul dispositivo + cloud cifrato.</p>
     </div>
   </div>
 </div>
 
-<!-- Script principale come modulo ES6 -->
+<script>
+// ── FIREBASE INIT ────────────────────────────────────────────────────────────
+const firebaseConfig = {
+  apiKey:            "AIzaSyAZeUs79SOCVSdyHstfBd1Illf8do7ILy0",
+  authDomain:        "budgetme-sync.firebaseapp.com",
+  projectId:         "budgetme-sync",
+  storageBucket:     "budgetme-sync.firebasestorage.app",
+  messagingSenderId: "407047265655",
+  appId:             "1:407047265655:web:b992980025dbbc6d61d572"
+};
+firebase.initializeApp(firebaseConfig);
+const _fbAuth = firebase.auth();
+const _fbDb   = firebase.firestore();
+</script>
+
 <script type="module">
-  import { initRouter } from './js/router.js';
-  import { downloadBackup, triggerImport, checkBackupReminder } from './js/backup.js';
+import { initRouter }    from './js/router.js';
+import { downloadBackup, triggerImport, checkBackupReminder } from './js/backup.js';
+import { initFirebase, loginWithGoogle, logout, setupEncryption,
+         unlockWithPassword, uploadData, downloadData,
+         syncState, updateSyncUI } from './js/sync.js';
 
-  // Inizializza icone Lucide
-  lucide.createIcons();
+// Inizializza icone
+lucide.createIcons();
 
-  // Inizializza router
-  await initRouter();
+// Inizializza Firebase sync
+initFirebase(firebase.app(), _fbDb, _fbAuth);
 
-  // Icone nella navbar (reinizializza dopo inject HTML)
-  lucide.createIcons();
+// Inizializza router
+await initRouter();
+lucide.createIcons();
 
-  // Backup
-  document.getElementById('btn-export').addEventListener('click', downloadBackup);
-  document.getElementById('btn-import').addEventListener('click', triggerImport);
+// Backup
+document.getElementById('btn-export').addEventListener('click', downloadBackup);
+document.getElementById('btn-import').addEventListener('click', triggerImport);
+if (checkBackupReminder()) {
+  document.getElementById('backup-reminder').classList.remove('hidden');
+}
 
-  // Reminder backup
-  if (checkBackupReminder()) {
-    document.getElementById('backup-reminder').classList.remove('hidden');
+// Ascolta eventi auth
+document.addEventListener('auth:loggedin', async (e) => {
+  const user = e.detail;
+  // Controlla se ha già configurato la cifratura
+  const hasSetup = await (await import('./js/sync.js')).hasEncryptionSetup
+    ? (await import('./js/sync.js')).hasEncryptionSetup()
+    : false;
+  showSyncStep(hasSetup ? 'unlock' : 'setup', user);
+});
+
+document.addEventListener('auth:loggedout', () => {
+  showSyncStep('login');
+  updateSyncUI();
+});
+
+// Esponi funzioni globali
+window.openSyncModal  = openSyncModal;
+window.closeSyncModal = closeSyncModal;
+window.doGoogleLogin  = async () => { await loginWithGoogle(); };
+window.doLogout       = async () => { await logout(); };
+window.doSetupEncryption = async () => {
+  const pwd  = document.getElementById('enc-pwd-new').value;
+  const pwd2 = document.getElementById('enc-pwd-confirm').value;
+  const err  = document.getElementById('setup-error');
+  if (pwd.length < 8) { err.textContent = 'La password deve avere almeno 8 caratteri'; err.style.display=''; return; }
+  if (pwd !== pwd2)   { err.textContent = 'Le password non corrispondono'; err.style.display=''; return; }
+  err.style.display = 'none';
+  try {
+    const { setupEncryption: se } = await import('./js/sync.js');
+    await se(pwd);
+    showSyncStep('synced', firebase.auth().currentUser);
+  } catch(e) {
+    err.textContent = 'Errore: ' + e.message; err.style.display='';
   }
-
-  // Service Worker
-  if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('./service-worker.js')
-      .then(() => console.log('SW registrato'))
-      .catch(e => console.warn('SW non registrato:', e));
+};
+window.doUnlock = async () => {
+  const pwd = document.getElementById('enc-pwd-unlock').value;
+  const err = document.getElementById('unlock-error');
+  try {
+    const { unlockWithPassword: ul } = await import('./js/sync.js');
+    await ul(pwd);
+    showSyncStep('synced', firebase.auth().currentUser);
+  } catch(e) {
+    err.textContent = e.message === 'Password errata' ? '❌ Password errata' : 'Errore: ' + e.message;
+    err.style.display = '';
   }
+};
+window.forceShowSetup = () => {
+  showSyncStep('setup', firebase.auth().currentUser);
+};
+
+window.doManualSync = async () => {
+  const { uploadData: up } = await import('./js/sync.js');
+  await up();
+  updateLastSyncTime();
+};
+
+function openSyncModal() {
+  const o = document.getElementById('sync-modal-overlay');
+  o.style.display = 'flex';
+  requestAnimationFrame(() => o.classList.add('open'));
+  lucide.createIcons();
+}
+function closeSyncModal() {
+  const o = document.getElementById('sync-modal-overlay');
+  o.classList.remove('open');
+  setTimeout(() => o.style.display = 'none', 250);
+}
+
+function showSyncStep(step, user = null) {
+  document.querySelectorAll('.sync-step').forEach(s => s.classList.remove('active'));
+  document.getElementById(`step-${step}`)?.classList.add('active');
+  if (user) {
+    const email = user.displayName ? `${user.displayName} (${user.email})` : user.email;
+    ['setup','unlock','synced'].forEach(id => {
+      const el = document.getElementById(`${id}-user-email`);
+      if (el) el.textContent = email;
+    });
+  }
+  if (step === 'synced') updateLastSyncTime();
+  openSyncModal();
+}
+
+function updateLastSyncTime() {
+  const el = document.getElementById('last-sync-time');
+  if (!el) return;
+  const ls = localStorage.getItem('lastSync');
+  el.textContent = ls
+    ? new Date(ls).toLocaleString('it-IT')
+    : 'Mai';
+}
+
+// Service Worker
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('./service-worker.js')
+    .then(() => console.log('SW registrato'))
+    .catch(e => console.warn('SW:', e));
+}
 </script>
 
 <script>
-  // Funzioni globali per onclick inline
-  function openSettings() {
-    const o = document.getElementById('modal-settings');
-    o.classList.remove('hidden');
-    requestAnimationFrame(() => o.classList.add('open'));
-  }
-  function closeSettings() {
-    const o = document.getElementById('modal-settings');
-    o.classList.remove('open');
-    setTimeout(() => o.classList.add('hidden'), 250);
-  }
-  // Chiudi modal cliccando overlay
-  document.getElementById('modal-settings').addEventListener('click', function(e) {
-    if (e.target === this) closeSettings();
-  });
+function openSettings() {
+  const o = document.getElementById('modal-settings');
+  o.classList.remove('hidden');
+  requestAnimationFrame(() => o.classList.add('open'));
+}
+function closeSettings() {
+  const o = document.getElementById('modal-settings');
+  o.classList.remove('open');
+  setTimeout(() => o.classList.add('hidden'), 250);
+}
+document.getElementById('modal-settings').addEventListener('click', function(e) {
+  if (e.target === this) closeSettings();
+});
 </script>
-
 </body>
 </html>
