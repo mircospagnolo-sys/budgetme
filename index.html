@@ -304,7 +304,9 @@ window.doSetupEncryption = async () => {
   try {
     const { setupEncryption: se } = await import('./js/sync.js');
     await se(pwd);
+    sessionStorage.setItem('syncUnlocked', '1');
     showSyncStep('synced', firebase.auth().currentUser);
+    closeSyncModal();
   } catch(e) {
     err.textContent = 'Errore: ' + e.message; err.style.display='';
   }
@@ -315,7 +317,9 @@ window.doUnlock = async () => {
   try {
     const { unlockWithPassword: ul } = await import('./js/sync.js');
     await ul(pwd);
+    sessionStorage.setItem('syncUnlocked', '1');
     showSyncStep('synced', firebase.auth().currentUser);
+    closeSyncModal();
   } catch(e) {
     err.textContent = e.message === 'Password errata' ? '❌ Password errata' : 'Errore: ' + e.message;
     err.style.display = '';

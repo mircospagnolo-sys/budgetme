@@ -88,6 +88,7 @@ export async function setupEncryption(password) {
 
   _encPwd = password;
   syncState.isEncReady = true;
+  sessionStorage.setItem('_bm_enc', password);
 
   // Prima sync: carica i dati locali su Firestore
   await uploadData();
@@ -109,6 +110,8 @@ export async function unlockWithPassword(password) {
 
   _encPwd = password;
   syncState.isEncReady = true;
+  // Salva in sessionStorage per sopravvivere al reload (si cancella alla chiusura del browser)
+  sessionStorage.setItem('_bm_enc', password);
 
   // Scarica e applica dati da Firestore
   await downloadData();
@@ -175,21 +178,30 @@ export async function downloadData() {
       return;
     }
 
-    const { encrypted, deviceId } = backup.data();
+    const { encrypted, deviceId, updatedAt } = backup.data();
 
-    // Se il backup è stato fatto da questo stesso dispositivo, non sovrascrivere
-    if (deviceId === getDeviceId()) {
+    // Confronta timestamp: se il cloud è più vecchio del locale, non scaricare
+    const lastLocalSync = localStorage.getItem('lastSync');
+    const cloudTime = updatedAt ? new Date(updatedAt).getTime() : 0;
+    const localTime = lastLocalSync ? new Date(lastLocalSync).getTime() : 0;
+
+    if (cloudTime <= localTime) {
+      // Il locale è aggiornato quanto o più del cloud — non sovrascrivere
+      console.log('[BudgetMe] Dati locali già aggiornati, nessun download necessario');
       syncState.lastSync = new Date();
       return;
     }
 
+    // Il cloud è più recente — scarica e applica
+    console.log('[BudgetMe] Scaricamento dati dal cloud...');
     const data = await decrypt(encrypted, _encPwd, salt);
     await importAllData(data);
     syncState.lastSync = new Date();
     localStorage.setItem('lastSync', syncState.lastSync.toISOString());
+    toast('✓ Dati aggiornati dal cloud', 'success');
 
-    // Ricarica la pagina per aggiornare tutte le viste
-    setTimeout(() => window.location.reload(), 800);
+    // Ricarica la pagina per mostrare i nuovi dati
+    setTimeout(() => window.location.reload(), 1200);
   } catch(e) {
     console.error('Download error:', e);
     toast('Errore scaricamento dati', 'error');
