@@ -153,6 +153,31 @@ export async function ensureDefaultCategorie() {
 }
 
 // ── HELPERS ───────────────────────────────────────────────────────────────────
+// ── VERSIONE 5: aggiunge movimenti_voce ──────────────────────────────────
+db.version(5).stores({
+  mesi:                   '++id, anno, mese',
+  voci_uscita:            '++id, mese_id, categoria, conto_id',
+  voci_entrata:           '++id, mese_id, categoria, conto_id',
+  accantonamenti:         '++id, voce',
+  crediti_sospeso:        '++id, stato, mese_id',
+  cedole_budget:          '++id, mese_id, incassata',
+  conti_correnti:         '++id, nome, attivo',
+  movimenti_conto:        '++id, conto_id, data, tipo',
+  conti_deposito:         '++id, banca, stato',
+  vincoli_deposito:       '++id, deposito_id, stato, data_scadenza',
+  cedole_deposito:        '++id, deposito_id, vincolo_id, incassata, data_incasso',
+  pac_etf:                '++id, nome, broker, attivo',
+  pac_versamenti:         '++id, pac_id, anno, mese',
+  categorie_budget:       '++id, tipo, ordine, attiva',
+  voci_budget:            '++id, categoria_id, ordine, attiva',
+  registrazioni:          '++id, voce_id, mese_id, [voce_id+mese_id]',
+  portafogli:             '++id, nome, attivo',
+  strumenti_portafoglio:  '++id, portafoglio_id, tipo_asset, attivo',
+  movimenti_portafoglio:  '++id, strumento_id, data, tipo_movimento',
+  beni_reali:             '++id, categoria, attivo',
+  movimenti_voce:         '++id, voce_id, mese_id, data'
+});
+
 // ── VERSIONE 4: aggiunge portafoglio investimenti ─────────────────────────
 db.version(4).stores({
   mesi:                   '++id, anno, mese',
@@ -213,9 +238,68 @@ db.on('ready', () => {
   ['mesi','voci_uscita','voci_entrata','accantonamenti','crediti_sospeso',
    'cedole_budget','conti_correnti','movimenti_conto','conti_deposito','vincoli_deposito',
    'cedole_deposito','pac_etf','pac_versamenti','categorie_budget','voci_budget',
-   'registrazioni','portafogli','strumenti_portafoglio','movimenti_portafoglio','beni_reali']
+   'registrazioni','portafogli','strumenti_portafoglio','movimenti_portafoglio',
+   'beni_reali','movimenti_voce']
   .forEach(t => { if (db[t]) patchTableForSync(db[t]); });
 });
+
+// ── INIT DEFAULT PORTAFOGLIO ─────────────────────────────────────────────────
+let _pfInitPromise = null;  // singleton: previene race condition su Promise.all
+
+async function initPortafoglioDefaults() {
+  if (_pfInitPromise) return _pfInitPromise;
+  _pfInitPromise = _doInitPortafoglioDefaults();
+  return _pfInitPromise;
+}
+
+async function _doInitPortafoglioDefaults() {
+  try {
+    const count = await db.portafogli.count();
+    if (count > 0) return; // già inizializzato
+
+    // Portafoglio Trade Republic
+    const pfId = await db.portafogli.add({
+      nome: 'Trade Republic', broker: 'Trade Republic',
+      tipo: 'broker', note: 'PAC mensile ETF', attivo: 1
+    });
+
+    // ETF
+    await db.strumenti_portafoglio.add({
+      portafoglio_id: pfId,
+      nome: 'UBS Core MSCI World UCITS ETF USD Acc',
+      ticker: 'UETW', isin: 'IE00BD4TXV59',
+      tipo_asset: 'etf_azionario', strategia: 'pac', modalita: 'accumulo',
+      valuta: 'EUR', note: 'World developed markets',
+      quantita: 110.376808, prezzo_attuale: 39.12,
+      valore_attuale: 4317.94, capitale_investito: 3780.41,
+      acquisto_medio: 34.25, attivo: 1
+    });
+    await db.strumenti_portafoglio.add({
+      portafoglio_id: pfId,
+      nome: 'iShares Core MSCI Emerging Markets IMI UCITS ETF (Acc)',
+      ticker: 'IS3N', isin: 'IE00B4KM4GZ66',
+      tipo_asset: 'etf_azionario', strategia: 'pac', modalita: 'accumulo',
+      valuta: 'EUR', note: 'Emerging markets',
+      quantita: 49.883695, prezzo_attuale: 48.19,
+      valore_attuale: 2403.90, capitale_investito: 1760.89,
+      acquisto_medio: 35.30, attivo: 1
+    });
+
+    // Oro fisico
+    await db.beni_reali.add({
+      nome: 'Lingottino oro Umicore 2.5g', categoria: 'oro_fisico',
+      costo_acquisto: 167.00, valore_attuale: 292.78,
+      quantita: 2.5, unita: 'g', data_acquisto: '', note: 'Umicore', attivo: 1
+    });
+    await db.beni_reali.add({
+      nome: 'Oro fisico (regali)', categoria: 'oro_fisico',
+      costo_acquisto: 0, valore_attuale: 2693.53,
+      quantita: 23, unita: 'g', data_acquisto: '', note: 'Ricevuto come regalo', attivo: 1
+    });
+  } catch(e) {
+    console.warn('_doInitPortafoglioDefaults:', e);
+  }
+}
 
 export async function getOrCreateMeseCorrente() {
   const now = new Date();

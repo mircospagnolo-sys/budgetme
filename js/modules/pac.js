@@ -259,6 +259,7 @@ async function renderPortafoglio() {
           </div>` : ''}
           <div class="str-actions">
             <button onclick="aggiornaValori(${st.id})" style="color:var(--blue)">📊 Aggiorna</button>
+              <button onclick="vediStorico(${st.id}, this.dataset.nome)" data-nome="${st.ticker||st.nome.slice(0,8)}" style="color:var(--purple)">📈 Storico</button>
             <button onclick="editStrumento(${st.id})">✏️ Modifica</button>
             <button onclick="deleteStrumento(${st.id})" style="color:var(--red)">🗑️</button>
           </div>
@@ -556,8 +557,21 @@ async function saveAggiorna() {
     acquisto_medio: acquistatoMedio,
     ultimo_aggiornamento: today()
   });
+
+  // Salva snapshot storico automatico
+  await db.movimenti_portafoglio.add({
+    strumento_id:   aggStrId,
+    data:           today(),
+    tipo_movimento: 'snapshot',
+    importo_totale: valoreAttuale,
+    prezzo_unitario: p,
+    quantita:       q,
+    commissioni:    i,   // campo riutilizzato per capitale_investito
+    note:           ''
+  });
+
   closePacModal('modal-aggiorna');
-  toast('Valori aggiornati', 'success');
+  toast('Valori aggiornati e storico salvato', 'success');
   await render();
 }
 
@@ -613,6 +627,115 @@ async function deleteBene(id) {
   toast('Bene eliminato');
   await render();
 }
+
+// ── STORICO ETF ──────────────────────────────────────────────────────────────
+window.vediStorico = async (strumentoId, nome) => {
+  const snaps = await db.movimenti_portafoglio
+    .where({ strumento_id: strumentoId, tipo_movimento: 'snapshot' })
+    .sortBy('data');
+
+  if (snaps.length === 0) {
+    alert('Nessuno storico disponibile. Clicca "Aggiorna" per salvare il primo snapshot.');
+    return;
+  }
+
+  // Crea/aggiorna modal storico
+  let modal = document.getElementById('modal-storico');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'modal-storico';
+    modal.className = 'modal-overlay hidden';
+    modal.innerHTML = `
+      <div class="modal" style="max-height:85dvh">
+        <div class="modal-header">
+          <h2 class="modal-title" id="storico-title">Storico</h2>
+          <button class="modal-close" onclick="closePacModal('modal-storico')">
+            <i data-lucide="x"></i>
+          </button>
+        </div>
+        <div style="position:relative;height:220px;margin-bottom:16px">
+          <canvas id="chart-storico"></canvas>
+        </div>
+        <div id="storico-lista" style="max-height:200px;overflow-y:auto"></div>
+      </div>`;
+    document.body.appendChild(modal);
+  }
+
+  document.getElementById('storico-title').textContent = `📈 Storico — ${nome}`;
+
+  // Grafico linea
+  const labels = snaps.map(s => {
+    const d = new Date(s.data);
+    return d.toLocaleDateString('it-IT', { day:'2-digit', month:'2-digit' });
+  });
+  const valori    = snaps.map(s => s.importo_totale || 0);
+  const capitali  = snaps.map(s => s.commissioni   || 0);
+
+  const existingChart = Chart.getChart('chart-storico');
+  if (existingChart) existingChart.destroy();
+
+  const ctx = document.getElementById('chart-storico').getContext('2d');
+  new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [
+        {
+          label: 'Valore attuale',
+          data: valori,
+          borderColor: '#1baf7a', backgroundColor: 'rgba(27,175,122,0.08)',
+          borderWidth: 2, pointRadius: 4, fill: true, tension: 0.3
+        },
+        {
+          label: 'Capitale investito',
+          data: capitali,
+          borderColor: '#888', backgroundColor: 'transparent',
+          borderWidth: 1.5, borderDash: [4,3], pointRadius: 3, fill: false, tension: 0.1
+        }
+      ]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { position: 'top', labels: { font: { size: 10 } } },
+        tooltip: {
+          callbacks: {
+            label: ctx => ` ${ctx.dataset.label}: ${new Intl.NumberFormat('it-IT',{style:'currency',currency:'EUR'}).format(ctx.raw)}`
+          }
+        }
+      },
+      scales: {
+        x: { ticks: { font: { size: 9 } }, grid: { display: false } },
+        y: {
+          ticks: { font: { size: 9 },
+            callback: v => v >= 1000 ? (v/1000).toFixed(1)+'k€' : v+'€'
+          },
+          grid: { color: 'rgba(0,0,0,0.05)' }
+        }
+      }
+    }
+  });
+
+  // Lista snapshot
+  const lista = document.getElementById('storico-lista');
+  lista.innerHTML = [...snaps].reverse().map(s => {
+    const guad = (s.importo_totale||0) - (s.commissioni||0);
+    const perf = s.commissioni > 0 ? (guad/s.commissioni*100).toFixed(2) : 0;
+    return `
+      <div style="display:flex;justify-content:space-between;padding:7px 0;
+           border-bottom:1px solid var(--border);font-size:0.82rem">
+        <span style="color:var(--text-muted)">${new Date(s.data).toLocaleDateString('it-IT')}</span>
+        <span>${new Intl.NumberFormat('it-IT',{style:'currency',currency:'EUR'}).format(s.importo_totale||0)}</span>
+        <span style="color:${guad>=0?'var(--green)':'var(--red)'}">
+          ${guad>=0?'+':''}${new Intl.NumberFormat('it-IT',{style:'currency',currency:'EUR'}).format(guad)} (${perf}%)
+        </span>
+        <span style="color:var(--text-muted)">${(s.prezzo_unitario||0).toFixed(2)}€/quota</span>
+      </div>`;
+  }).join('');
+
+  openPacModal('modal-storico');
+  lucide.createIcons();
+};
 
 // ── HELPERS MODAL ─────────────────────────────────────────────────────────────
 function openPacModal(id) {

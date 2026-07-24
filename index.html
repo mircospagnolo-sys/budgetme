@@ -260,6 +260,9 @@ import { initFirebase, loginWithGoogle, logout, setupEncryption,
 // Inizializza icone
 lucide.createIcons();
 
+// Force fresh db module
+const freshDb = await import('./js/db.js?v=' + Date.now());
+
 // Inizializza Firebase sync
 initFirebase(firebase.app(), _fbDb, _fbAuth);
 

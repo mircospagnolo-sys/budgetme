@@ -174,6 +174,12 @@ async function render() {
               <span class="vinc-badge ${v.svincolabile ? 'badge-green' : 'badge-red'}">
                 ${v.svincolabile ? 'svincolabile' : 'vincolato'}
               </span>
+              <span class="vinc-badge ${v.stato === 'scaduto' ? 'badge-red' : 'badge-green'}">
+                ${v.stato === 'scaduto' ? 'scaduto' : 'attivo'}
+              </span>
+              <span class="vinc-badge badge-blue">
+                ${v.tipo_erogazione === 'anticipata' ? 'liq. anticipata' : 'liq. a scadenza'}
+              </span>
             </div>
             <div class="vinc-info">${formatEur(v.importo)} al ${v.tasso_lordo}% lordo</div>
             <div class="vinc-scad">
@@ -321,8 +327,10 @@ async function addVincolo(depId) {
   ['vinc-numero','vinc-importo','vinc-tasso','vinc-interessi'].forEach(id =>
     document.getElementById(id).value = '');
   document.getElementById('vinc-decorrenza').value = today();
-  document.getElementById('vinc-scadenza').value   = '';
+  document.getElementById('vinc-scadenza').value    = '';
   document.getElementById('vinc-svincolabile').value = '1';
+  document.getElementById('vinc-stato').value        = 'attivo';
+  document.getElementById('vinc-erogazione').value   = 'a_scadenza';
   await populateDepositiSelect('vinc-deposito-id', depId);
   openDepModal('modal-vincolo');
 }
@@ -339,6 +347,8 @@ async function editVincolo(id) {
   document.getElementById('vinc-tasso').value        = v.tasso_lordo || '';
   document.getElementById('vinc-interessi').value    = v.interessi_netti || '';
   document.getElementById('vinc-svincolabile').value = v.svincolabile ?? 1;
+  document.getElementById('vinc-stato').value        = v.stato || 'attivo';
+  document.getElementById('vinc-erogazione').value   = v.tipo_erogazione || 'a_scadenza';
   await populateDepositiSelect('vinc-deposito-id', v.deposito_id);
   openDepModal('modal-vincolo');
 }
