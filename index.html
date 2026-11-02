@@ -90,20 +90,17 @@
 
   <!-- Navbar -->
   <nav id="navbar" role="navigation" aria-label="Navigazione principale">
-    <button class="nav-item active" data-route="dashboard" aria-label="Dashboard">
+    <button class="nav-item active" data-route="home" aria-label="Home">
       <i data-lucide="layout-dashboard"></i><span>Home</span>
     </button>
-    <button class="nav-item" data-route="budget" aria-label="Budget">
-      <i data-lucide="receipt"></i><span>Budget</span>
+    <button class="nav-item" data-route="mese" aria-label="Mese corrente">
+      <i data-lucide="calendar"></i><span>Mese</span>
     </button>
-    <button class="nav-item" data-route="conti" aria-label="Conti correnti">
-      <i data-lucide="landmark"></i><span>Conti</span>
+    <button class="nav-item" data-route="patrimonio" aria-label="Patrimonio">
+      <i data-lucide="landmark"></i><span>Patrimonio</span>
     </button>
-    <button class="nav-item" data-route="depositi" aria-label="Conti deposito">
-      <i data-lucide="piggy-bank"></i><span>Depositi</span>
-    </button>
-    <button class="nav-item" data-route="pac" aria-label="Investimenti">
-      <i data-lucide="trending-up"></i><span>Invest.</span>
+    <button class="nav-item" data-route="analisi" aria-label="Analisi">
+      <i data-lucide="bar-chart-2"></i><span>Analisi</span>
     </button>
   </nav>
 </div>
@@ -259,9 +256,6 @@ import { initFirebase, loginWithGoogle, logout, setupEncryption,
 
 // Inizializza icone
 lucide.createIcons();
-
-// Force fresh db module
-const freshDb = await import('./js/db.js?v=' + Date.now());
 
 // Inizializza Firebase sync
 initFirebase(firebase.app(), _fbDb, _fbAuth);

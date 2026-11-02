@@ -1,10 +1,9 @@
-/* BudgetMe — router.js */
+/* BudgetMe — router.js v2 */
 const routes = {
-  dashboard: { page: 'pages/dashboard.html', module: './js/modules/dashboard.js', label: 'Dashboard' },
-  budget:    { page: 'pages/budget.html',    module: './js/modules/budget.js',    label: 'Budget' },
-  conti:     { page: 'pages/conti.html',     module: './js/modules/conti.js',     label: 'Conti' },
-  depositi:  { page: 'pages/depositi.html',  module: './js/modules/depositi.js',  label: 'Depositi' },
-  pac:       { page: 'pages/pac.html',       module: './js/modules/pac.js',       label: 'Investimenti' }
+  home:       { page: 'pages/dashboard.html', module: './modules/dashboard.js', label: 'Home' },
+  mese:       { page: 'pages/mese.html',      module: './modules/mese.js',      label: 'Mese' },
+  patrimonio: { page: 'pages/patrimonio.html',module: './modules/patrimonio.js',label: 'Patrimonio' },
+  analisi:    { page: 'pages/analisi.html',   module: './modules/analisi.js',   label: 'Analisi' }
 };
 
 let currentRoute = null;
@@ -26,7 +25,6 @@ export async function navigate(routeName) {
     return;
   }
 
-  // Importa sempre fresh — nessuna cache dei moduli
   const mod = await import(route.module.replace('./js/', './') + '?v=' + Date.now());
   if (mod?.init) await mod.init();
 
@@ -37,6 +35,6 @@ export async function navigate(routeName) {
 export function initRouter() {
   document.querySelectorAll('.nav-item').forEach(el =>
     el.addEventListener('click', () => navigate(el.dataset.route)));
-  const last = sessionStorage.getItem('lastRoute') || 'dashboard';
+  const last = sessionStorage.getItem('lastRoute') || 'home';
   navigate(last);
 }

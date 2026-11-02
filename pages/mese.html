@@ -1,0 +1,25 @@
+<!-- Mese -->
+<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+  <button id="btn-prec" style="width:36px;height:36px;border-radius:50%;
+    background:var(--bg-card);border:1px solid var(--border);
+    font-size:20px;cursor:pointer;display:flex;align-items:center;justify-content:center">‹</button>
+  <div style="text-align:center">
+    <div id="mese-label" style="font-size:1.05rem;font-weight:700"></div>
+    <div style="display:flex;align-items:center;gap:8px;justify-content:center;margin-top:4px">
+      <span id="mese-stato" class="badge badge-blue">Aperto</span>
+      <span id="mese-saldo-apertura" style="font-size:0.75rem;color:var(--text-muted)"></span>
+    </div>
+  </div>
+  <button id="btn-succ" style="width:36px;height:36px;border-radius:50%;
+    background:var(--bg-card);border:1px solid var(--border);
+    font-size:20px;cursor:pointer;display:flex;align-items:center;justify-content:center">›</button>
+</div>
+<div class="tabs" id="mese-tabs">
+  <button class="tab-btn active" data-tab="piano">Piano</button>
+  <button class="tab-btn" data-tab="movimenti">Movimenti</button>
+  <button class="tab-btn" data-tab="budget">Budget</button>
+  <button class="tab-btn" data-tab="riconciliazione">Chiusura</button>
+</div>
+<div id="mese-root">
+  <div class="spinner" style="margin:32px auto"></div>
+</div>

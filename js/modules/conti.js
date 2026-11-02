@@ -316,6 +316,33 @@ async function saveMovimento() {
     descrizione: desc, conto_dest_id: destId
   });
 
+  // Collegamento automatico → budget se ha una categoria
+if (cat && tipoMovimento !== 'trasferimento') {
+  const voci = await db.voci_budget.toArray();
+  const voce = voci.find(v => v.nome === cat);
+  if (voce) {
+    const anno   = parseInt(data.slice(0,4));
+    const meseN  = parseInt(data.slice(5,7));
+    let meseRec  = await db.mesi.where({ anno, mese: meseN }).first();
+    if (!meseRec) {
+      const id = await db.mesi.add({
+        anno, mese: meseN, note: '', chiuso: false,
+        stato: 'aperto', creato_il: new Date().toISOString()
+      });
+      meseRec = await db.mesi.get(id);
+    }
+    await db.movimenti_voce.add({
+      voce_id:     voce.id,
+      mese_id:     meseRec.id,
+      data,
+      importo:     Math.abs(importo),
+      modalita:    tipoMovimento === 'entrata' ? 'bonifico' : 'pos',
+      descrizione: desc || cat,
+      note:        'Da movimento bancario'
+    });
+  }
+}
+
   toast('Movimento salvato', 'success');
   closeModal('modal-movimento');
   await render();

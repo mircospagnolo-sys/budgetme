@@ -153,6 +153,60 @@ export async function ensureDefaultCategorie() {
 }
 
 // ── HELPERS ───────────────────────────────────────────────────────────────────
+db.version(7).stores({
+  mesi:                   '++id, anno, mese, stato',
+  voci_uscita:            '++id, mese_id, categoria, conto_id',
+  voci_entrata:           '++id, mese_id, categoria, conto_id',
+  accantonamenti:         '++id, voce',
+  crediti_sospeso:        '++id, stato, mese_id',
+  cedole_budget:          '++id, mese_id, incassata',
+  conti_correnti:         '++id, nome, attivo',
+  movimenti_conto:        '++id, conto_id, data, tipo, categorizzato',
+  conti_deposito:         '++id, banca, stato',
+  vincoli_deposito:       '++id, deposito_id, stato, data_scadenza',
+  cedole_deposito:        '++id, deposito_id, vincolo_id, incassata, data_incasso',
+  pac_etf:                '++id, nome, broker, attivo',
+  pac_versamenti:         '++id, pac_id, anno, mese',
+  categorie_budget:       '++id, tipo, ordine, attiva',
+  voci_budget:            '++id, categoria_id, ordine, attiva',
+  registrazioni:          '++id, voce_id, mese_id, [voce_id+mese_id]',
+  portafogli:             '++id, nome, attivo',
+  strumenti_portafoglio:  '++id, portafoglio_id, tipo_asset, attivo',
+  movimenti_portafoglio:  '++id, strumento_id, data, tipo_movimento',
+  beni_reali:             '++id, categoria, attivo',
+  movimenti_voce:         '++id, voce_id, mese_id, data',
+  previsioni_mensili:     '++id, voce_id, mese_id, [voce_id+mese_id]',
+  riconciliazioni:        '++id, mese_id, conto_id',
+  piano_mensile:          '++id, mese_id'
+});
+
+// Versione 6: aggiunge previsioni_mensili e riconciliazioni
+db.version(6).stores({
+  mesi:                   '++id, anno, mese, stato',
+  voci_uscita:            '++id, mese_id, categoria, conto_id',
+  voci_entrata:           '++id, mese_id, categoria, conto_id',
+  accantonamenti:         '++id, voce',
+  crediti_sospeso:        '++id, stato, mese_id',
+  cedole_budget:          '++id, mese_id, incassata',
+  conti_correnti:         '++id, nome, attivo',
+  movimenti_conto:        '++id, conto_id, data, tipo, categorizzato',
+  conti_deposito:         '++id, banca, stato',
+  vincoli_deposito:       '++id, deposito_id, stato, data_scadenza',
+  cedole_deposito:        '++id, deposito_id, vincolo_id, incassata, data_incasso',
+  pac_etf:                '++id, nome, broker, attivo',
+  pac_versamenti:         '++id, pac_id, anno, mese',
+  categorie_budget:       '++id, tipo, ordine, attiva',
+  voci_budget:            '++id, categoria_id, ordine, attiva',
+  registrazioni:          '++id, voce_id, mese_id, [voce_id+mese_id]',
+  portafogli:             '++id, nome, attivo',
+  strumenti_portafoglio:  '++id, portafoglio_id, tipo_asset, attivo',
+  movimenti_portafoglio:  '++id, strumento_id, data, tipo_movimento',
+  beni_reali:             '++id, categoria, attivo',
+  movimenti_voce:         '++id, voce_id, mese_id, data',
+  previsioni_mensili:     '++id, voce_id, mese_id, [voce_id+mese_id]',
+  riconciliazioni:        '++id, mese_id, conto_id'
+});
+
 // ── VERSIONE 5: aggiunge movimenti_voce ──────────────────────────────────
 db.version(5).stores({
   mesi:                   '++id, anno, mese',
@@ -310,6 +364,30 @@ export async function getOrCreateMeseCorrente() {
     rec = await db.mesi.get(id);
   }
   return rec;
+}
+
+// Ottieni o crea un mese specifico per anno e mese
+export async function getOrCreateMese(anno, mese) {
+  let rec = await db.mesi.where({ anno, mese }).first();
+  if (!rec) {
+    const id = await db.mesi.add({
+      anno, mese, note: '', chiuso: false,
+      stato: 'aperto', creato_il: new Date().toISOString()
+    });
+    rec = await db.mesi.get(id);
+  }
+  return rec;
+}
+
+// Previsione per voce nel mese (previsioni_mensili → fallback previsione_default)
+export async function getPrevisioneVoce(voceId, meseId) {
+  try {
+    const prev = await db.previsioni_mensili
+      .where({ voce_id: voceId, mese_id: meseId }).first();
+    if (prev) return prev.importo;
+  } catch(e) {}
+  const voce = await db.voci_budget.get(voceId);
+  return voce?.previsione_default || 0;
 }
 
 export async function totaleUsciteMese(mese_id) {
