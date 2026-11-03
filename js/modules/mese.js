@@ -14,6 +14,71 @@ let currentMeseNum = new Date().getMonth() + 1;
 let currentMese    = null;
 let currentTab = 'piano';
 
+// ── MAPPA BUSTE ──────────────────────────────────────────────────────────────
+// Le voci elencate in "voci" hanno la precedenza sulla categoria.
+// I nomi devono coincidere con quelli in Budget → Gestione voci.
+const BUSTE = {
+  prima: {
+    cat:  ['Risparmio e Liquidità', 'Investimento Lungo Termine'],
+    voci: []
+  },
+  obblig: {
+    cat:  ['Spese Fisse Contrattuali', 'Canoni Bancari', 'Figli'],
+    voci: ['Utenze Luce + Gas', 'Utenza Acqua', 'Carburante / Auto']
+  },
+  persone: {
+    cat:  ['Spese Discrezionali'],
+    voci: []
+  },
+  gestione: {
+    cat:  ['Spese Variabili Necessarie', 'Spese Irregolari / Annuali', 'Fiscalità'],
+    voci: ['Farmacia / Salute', 'Casa / Varie', 'Casa / Fai da Te', 'Autolavaggio']
+  }
+};
+
+function bustaDi(voceNome, catNome) {
+  for (const [busta, def] of Object.entries(BUSTE)) {
+    if (def.voci.includes(voceNome)) return busta;
+  }
+  for (const [busta, def] of Object.entries(BUSTE)) {
+    if (def.cat.includes(catNome)) return busta;
+  }
+  return null;
+}
+
+// Piano e reale di ogni voce del mese, raggruppati per busta
+async function calcolaBusteMese() {
+  const [cats, voci, regs, movs, prevMens] = await Promise.all([
+    db.categorie_budget.toArray(),
+    db.voci_budget.where('attiva').equals(1).toArray(),
+    db.registrazioni.where('mese_id').equals(currentMese.id).toArray(),
+    db.movimenti_voce.where('mese_id').equals(currentMese.id).toArray(),
+    db.previsioni_mensili.where('mese_id').equals(currentMese.id).toArray()
+  ]);
+
+  const catMap  = Object.fromEntries(cats.map(c => [c.id, c]));
+  const regsMap = Object.fromEntries(regs.map(r => [r.voce_id, r]));
+  const prevMap = Object.fromEntries(prevMens.map(p => [p.voce_id, p.importo]));
+  const movsMap = {};
+  movs.forEach(m => { movsMap[m.voce_id] = (movsMap[m.voce_id] || 0) + m.importo; });
+
+  const out = { entrate: [], prima: [], obblig: [], persone: [], gestione: [], altro: [] };
+
+  for (const v of voci) {
+    const cat = catMap[v.categoria_id];
+    if (!cat) continue;
+    const reale = movsMap[v.id] ?? regsMap[v.id]?.importo_reale ?? 0;
+    const piano = prevMap[v.id] ?? regsMap[v.id]?.previsione_override ?? v.previsione_default ?? 0;
+    const riga  = { nome: v.nome, piano, reale };
+
+    if (cat.tipo === 'entrata') { out.entrate.push(riga); continue; }
+    out[bustaDi(v.nome, cat.nome) || 'altro'].push(riga);
+  }
+  return out;
+}
+
+const sommaRighe = (righe, campo) => righe.reduce((s, r) => s + r[campo], 0);
+
 export async function init() {
   setupGlobals();
   await loadMese();
@@ -93,211 +158,206 @@ async function renderPiano() {
   const root = document.getElementById('mese-root');
   root.innerHTML = `<div class="spinner" style="margin:24px auto"></div>`;
 
-  // Carica piano esistente o crea default
-  let piano = await db.piano_mensile.where('mese_id').equals(currentMese.id).first();
+  const [piano, buste] = await Promise.all([
+    db.piano_mensile.where('mese_id').equals(currentMese.id).first(),
+    calcolaBusteMese()
+  ]);
 
-  // Calcola obbligazioni fisse dal budget
-  const cats = await db.categorie_budget.toArray();
-  const voci = await db.voci_budget.where('attiva').equals(1).toArray();
-  const prevMens = await db.previsioni_mensili
-    .where('mese_id').equals(currentMese.id).toArray();
-  const prevMap = Object.fromEntries(prevMens.map(p => [p.voce_id, p.importo]));
+  // Modifiche manuali alle obbligazioni, salvate per nome voce
+  const ovr = {};
+  try {
+    JSON.parse(piano?.obbligazioni_override || '[]')
+      .forEach(o => { ovr[o.nome] = o.importo; });
+  } catch (e) {}
 
-  const catFisse = cats.find(c => c.nome === 'Spese Fisse Contrattuali');
-  const catCanoni = cats.find(c => c.nome === 'Canoni Bancari');
+  const righeObbl = buste.obblig
+    .map(r => ({ ...r, piano: ovr[r.nome] ?? r.piano }))
+    .filter(r => r.piano > 0 || r.reale > 0 || ovr[r.nome] !== undefined);
 
-  let obbligazioni = 0;
-  const vociObbligate = [];
+  const stipendio  = piano?.stipendio_atteso     ?? 2250;
+  const primaPiano = piano?.prima_te_stesso      ?? 200;
+  const primaNote  = piano?.prima_te_stesso_note ?? '';
+  const persPiano  = piano?.spese_personali      ?? 300;
 
-  for (const cat of [catFisse, catCanoni].filter(Boolean)) {
-    const vociCat = voci.filter(v => v.categoria_id === cat.id);
-    for (const v of vociCat) {
-      const prev = prevMap[v.id] ?? v.previsione_default ?? 0;
-      if (prev > 0) {
-        obbligazioni += prev;
-        vociObbligate.push({ nome: v.nome, importo: prev });
-      }
-    }
-  }
+  const realeEntrate = sommaRighe(buste.entrate, 'reale');
+  const realePrima   = sommaRighe(buste.prima, 'reale');
+  const realeObbl    = sommaRighe(buste.obblig, 'reale');
+  const realePers    = sommaRighe(buste.persone, 'reale');
+  const realeGest    = sommaRighe(buste.gestione, 'reale');
+  const altro = buste.altro.filter(r => r.piano > 0 || r.reale > 0);
 
-  // Override manuale obbligazioni
-  if (piano?.obbligazioni_override) {
-    try {
-      const ovr = JSON.parse(piano.obbligazioni_override);
-      ovr.forEach(o => {
-        const idx = vociObbligate.findIndex(v => v.nome === o.nome);
-        if (idx >= 0) vociObbligate[idx].importo = o.importo;
-        obbligazioni = vociObbligate.reduce((s, v) => s + v.importo, 0);
-      });
-    } catch(e) {}
-  }
+  // Importi mostrati in euro interi per stare nelle colonne
+  const eur0  = v => new Intl.NumberFormat('it-IT').format(Math.round(v) || 0);
+  const segno = v => (v > 0 ? '+' : '') + eur0(v);
 
-  const stipendio   = piano?.stipendio_atteso   ?? 2250;
-  const primateTe   = piano?.prima_te_stesso    ?? 200;
-  const primaNote   = piano?.prima_te_stesso_note ?? '';
-  const spesePers   = piano?.spese_personali    ?? 300;
-  const residuo     = stipendio - primateTe - obbligazioni;
-  const gestione    = residuo - spesePers;
+  const GRID = 'display:grid;grid-template-columns:1fr 64px 56px 56px;gap:4px;align-items:center';
+  const NUM  = 'font-size:0.8rem;text-align:right;font-variant-numeric:tabular-nums';
+  const INP  = 'width:100%;box-sizing:border-box;text-align:right;font-size:0.8rem;font-weight:600;' +
+               'padding:3px 4px;border:1px solid var(--border);border-radius:4px;' +
+               'background:var(--bg-card);color:var(--text)';
+  const SMALL = 'font-size:0.68rem;color:var(--text-muted)';
+
+  const intestazione = (titolo, colore) => `
+    <div style="${GRID};margin-bottom:6px">
+      <span style="font-size:0.78rem;font-weight:700;color:${colore};white-space:nowrap;
+                   overflow:hidden;text-overflow:ellipsis">${titolo}</span>
+      <span style="${NUM};${SMALL}">Piano</span>
+      <span style="${NUM};${SMALL}">Reale</span>
+      <span style="${NUM};${SMALL}">Resta</span>
+    </div>`;
+
+  const rigaVoce = r => `
+    <div style="${GRID};padding:4px 0;border-bottom:1px solid var(--border)">
+      <span style="font-size:0.8rem;min-width:0;overflow:hidden;text-overflow:ellipsis">${r.nome}</span>
+      <input type="number" class="voce-obbl" data-voce="${r.nome.replace(/"/g, '&quot;')}"
+             data-reale="${r.reale}" value="${r.piano}" style="${INP}"
+             inputmode="decimal" step="10">
+      <span style="${NUM}">${eur0(r.reale)}</span>
+      <span class="resta-voce" style="${NUM}"></span>
+    </div>`;
+
+  const realeResiduo = realeEntrate > 0
+    ? eur0(realeEntrate - realePrima - realeObbl) : '—';
 
   root.innerHTML = `
-    <div style="font-size:0.78rem;color:var(--text-muted);margin-bottom:12px;text-align:center">
-      Pianifica come distribuire le entrate di ${MESI_NOMI[currentMeseNum]}
+    <div style="font-size:0.75rem;color:var(--text-muted);margin-bottom:12px;text-align:center">
+      Resta = Piano − Reale · importi in euro
     </div>
 
-    <!-- ① Stipendio -->
+    <!-- ① Entrate -->
     <div class="card" style="margin-bottom:10px;border-left:4px solid var(--blue)">
-      <div style="display:flex;justify-content:space-between;align-items:center">
-        <div>
-          <div style="font-size:0.75rem;font-weight:700;color:var(--text-muted);
-               text-transform:uppercase;letter-spacing:0.05em">① Entrate attese</div>
-          <div style="font-size:0.8rem;color:var(--text-muted)">Stipendio + altre entrate</div>
-        </div>
-        <input type="number" id="piano-stipendio" value="${stipendio}"
-          style="width:100px;text-align:right;font-size:1.1rem;font-weight:700;
-                 border:1px solid var(--border);border-radius:6px;padding:4px 8px;
-                 background:var(--bg-card);color:var(--text)"
-          inputmode="decimal" step="10">
+      ${intestazione('① Entrate', 'var(--blue)')}
+      <div style="${GRID}">
+        <span style="font-size:0.8rem;color:var(--text-muted)">Stipendio e altre</span>
+        <input type="number" id="piano-stipendio" value="${stipendio}" style="${INP}"
+               inputmode="decimal" step="10">
+        <span style="${NUM}">${eur0(realeEntrate)}</span>
+        <span id="r-entrate" style="${NUM};font-weight:700"></span>
       </div>
     </div>
 
     <!-- ② Prima te stesso -->
     <div class="card" style="margin-bottom:10px;border-left:4px solid var(--green)">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
-        <div>
-          <div style="font-size:0.75rem;font-weight:700;color:var(--green);
-               text-transform:uppercase;letter-spacing:0.05em">② Prima te stesso 🏦</div>
-          <div style="font-size:0.8rem;color:var(--text-muted)">Risparmio/investimento intoccabile</div>
-        </div>
-        <input type="number" id="piano-primatete" value="${primateTe}"
-          style="width:100px;text-align:right;font-size:1.1rem;font-weight:700;
-                 border:1px solid var(--green);border-radius:6px;padding:4px 8px;
-                 background:var(--bg-card);color:var(--green)"
-          inputmode="decimal" step="10">
+      ${intestazione('② Prima te stesso', 'var(--green)')}
+      <div style="${GRID};margin-bottom:6px">
+        <span style="font-size:0.8rem;color:var(--text-muted)">Risparmio intoccabile</span>
+        <input type="number" id="piano-primatete" value="${primaPiano}" style="${INP}"
+               inputmode="decimal" step="10">
+        <span style="${NUM}">${eur0(realePrima)}</span>
+        <span id="r-prima" style="${NUM};font-weight:700"></span>
       </div>
       <input type="text" id="piano-primanote" value="${primaNote}"
-        placeholder="es. PAC ETF 100€ + Deposito 100€"
-        style="width:100%;font-size:0.8rem;border:1px solid var(--border);
-               border-radius:6px;padding:6px 8px;background:var(--bg);color:var(--text)">
+             placeholder="es. PAC ETF 100€ + Deposito 100€"
+             style="width:100%;box-sizing:border-box;font-size:0.78rem;padding:6px 8px;
+                    border:1px solid var(--border);border-radius:6px;
+                    background:var(--bg);color:var(--text)">
     </div>
 
     <!-- ③ Obbligazioni fisse -->
     <div class="card" style="margin-bottom:10px;border-left:4px solid var(--red)">
-      <div style="margin-bottom:8px">
-        <div style="font-size:0.75rem;font-weight:700;color:var(--red);
-             text-transform:uppercase;letter-spacing:0.05em">③ Obbligazioni fisse 🏠</div>
-        <div style="font-size:0.8rem;color:var(--text-muted)">Da categorie budget — modificabili</div>
-      </div>
-      ${vociObbligate.map(v => `
-        <div style="display:flex;justify-content:space-between;align-items:center;
-             padding:4px 0;border-bottom:1px solid var(--border)">
-          <span style="font-size:0.82rem">${v.nome}</span>
-          <input type="number" data-voce="${v.nome}" value="${v.importo}"
-            class="voce-obbl"
-            style="width:80px;text-align:right;font-size:0.85rem;font-weight:600;
-                   border:1px solid var(--border);border-radius:4px;padding:2px 6px;
-                   background:var(--bg-card);color:var(--text)"
-            inputmode="decimal" step="10">
-        </div>`).join('')}
-      <div style="display:flex;justify-content:space-between;margin-top:8px;
-           font-weight:700;font-size:0.9rem">
-        <span>Totale obbligazioni</span>
-        <span id="tot-obbl" style="color:var(--red)">${formatEur(obbligazioni)}</span>
+      ${intestazione('③ Obbligazioni fisse', 'var(--red)')}
+      ${righeObbl.length
+        ? righeObbl.map(rigaVoce).join('')
+        : '<div style="font-size:0.8rem;color:var(--text-muted);padding:6px 0">Nessuna voce con importo.</div>'}
+      <div style="${GRID};margin-top:8px">
+        <span style="font-size:0.8rem;font-weight:700">Totale</span>
+        <span id="p-obbl" style="${NUM};font-weight:700"></span>
+        <span style="${NUM};font-weight:700">${eur0(realeObbl)}</span>
+        <span id="r-obbl" style="${NUM};font-weight:700"></span>
       </div>
     </div>
 
     <!-- Residuo -->
-    <div style="background:var(--bg);border-radius:var(--radius-sm);
-         padding:10px 14px;margin-bottom:10px;
-         border:2px solid ${residuo>=0?'var(--blue)':'var(--red)'}">
-      <div style="display:flex;justify-content:space-between;font-size:0.85rem">
-        <span style="color:var(--text-muted)">Entrate</span>
-        <span id="calc-entrate">${formatEur(stipendio)}</span>
-      </div>
-      <div style="display:flex;justify-content:space-between;font-size:0.85rem">
-        <span style="color:var(--text-muted)">− Prima te stesso</span>
-        <span id="calc-primatete" style="color:var(--green)">${formatEur(primateTe)}</span>
-      </div>
-      <div style="display:flex;justify-content:space-between;font-size:0.85rem">
-        <span style="color:var(--text-muted)">− Obbligazioni</span>
-        <span id="calc-obbl" style="color:var(--red)">${formatEur(obbligazioni)}</span>
-      </div>
-      <div style="display:flex;justify-content:space-between;font-weight:700;
-           font-size:1rem;margin-top:6px;padding-top:6px;border-top:1px solid var(--border)">
-        <span>Residuo disponibile</span>
-        <span id="calc-residuo" style="color:${residuo>=0?'var(--blue)':'var(--red)'}">
-          ${formatEur(residuo)}
-        </span>
+    <div style="border:2px solid var(--blue);border-radius:var(--radius-sm);
+                padding:10px 12px;margin-bottom:10px">
+      <div style="${GRID}">
+        <span style="font-size:0.85rem;font-weight:700">Residuo disponibile</span>
+        <span id="p-residuo" style="${NUM};font-weight:700"></span>
+        <span style="${NUM};font-weight:700">${realeResiduo}</span>
+        <span></span>
       </div>
     </div>
 
-    <!-- ④ Distribuzione residuo -->
-    <div class="card" style="margin-bottom:16px;border-left:4px solid var(--purple)">
-      <div style="font-size:0.75rem;font-weight:700;color:var(--purple);
-           text-transform:uppercase;letter-spacing:0.05em;margin-bottom:10px">
-        ④ Distribuzione residuo
-      </div>
-      <div style="display:flex;justify-content:space-between;align-items:center;
-           padding:6px 0;border-bottom:1px solid var(--border)">
+    <!-- ④ Distribuzione del residuo -->
+    <div class="card" style="margin-bottom:10px;border-left:4px solid var(--purple)">
+      ${intestazione('④ Distribuzione del residuo', 'var(--purple)')}
+      <div style="${GRID};padding:6px 0;border-bottom:1px solid var(--border)">
         <div>
-          <div style="font-size:0.85rem;font-weight:600">🎯 Spese personali</div>
-          <div style="font-size:0.72rem;color:var(--text-muted)">
-            Abbigliamento, hobby, ristorazione...
-          </div>
+          <div style="font-size:0.82rem;font-weight:600">Spese personali</div>
+          <div style="${SMALL}">Abbigliamento, hobby, ristorazione…</div>
         </div>
-        <input type="number" id="piano-persone" value="${spesePers}"
-          style="width:80px;text-align:right;font-size:0.95rem;font-weight:700;
-                 border:1px solid var(--border);border-radius:6px;padding:4px 6px;
-                 background:var(--bg-card);color:var(--text)"
-          inputmode="decimal" step="10">
+        <input type="number" id="piano-persone" value="${persPiano}" style="${INP}"
+               inputmode="decimal" step="10">
+        <span style="${NUM}">${eur0(realePers)}</span>
+        <span id="r-pers" style="${NUM};font-weight:700"></span>
       </div>
-      <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0">
+      <div style="${GRID};padding:6px 0">
         <div>
-          <div style="font-size:0.85rem;font-weight:600">🛒 Gestione ordinaria</div>
-          <div style="font-size:0.72rem;color:var(--text-muted)">
-            Alimentari, farmacia, casa...
-          </div>
+          <div style="font-size:0.82rem;font-weight:600">Gestione ordinaria</div>
+          <div style="${SMALL}">Alimentari, farmacia, casa…</div>
         </div>
-        <span id="piano-gestione" style="font-size:0.95rem;font-weight:700;
-          color:${gestione>=0?'var(--text)':'var(--red)'}">
-          ${formatEur(gestione)}
-        </span>
+        <span id="p-gest" style="${NUM};font-weight:700"></span>
+        <span style="${NUM}">${eur0(realeGest)}</span>
+        <span id="r-gest" style="${NUM};font-weight:700"></span>
       </div>
     </div>
+
+    ${altro.length ? `
+    <div style="font-size:0.75rem;color:var(--orange);background:var(--orange-light);
+                border-radius:var(--radius-sm);padding:8px 10px;margin-bottom:10px">
+      ⚠️ ${altro.length} voci non assegnate a nessuna busta (${altro.map(r => r.nome).join(', ')}).
+      Aggiungile all'elenco BUSTE in mese.js.
+    </div>` : ''}
 
     <button class="btn btn-primary btn-full" onclick="window.salvaPiano()">
       💾 Salva piano ${MESI_NOMI[currentMeseNum]}
     </button>
   `;
 
-  // Aggiornamento live al cambio valori
+  // Ricalcolo live: i valori "Reale" restano quelli letti dai movimenti
+  const VERDE = 'var(--green)', ROSSO = 'var(--red)', ARANCIO = 'var(--orange)';
+  const set = (id, testo, colore) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.textContent = testo;
+    if (colore) el.style.color = colore;
+  };
+
   const aggiorna = () => {
     const stip  = parseFloat(document.getElementById('piano-stipendio').value) || 0;
     const prima = parseFloat(document.getElementById('piano-primatete').value) || 0;
+    const pers  = parseFloat(document.getElementById('piano-persone').value) || 0;
+
     let totObbl = 0;
     document.querySelectorAll('.voce-obbl').forEach(inp => {
-      totObbl += parseFloat(inp.value) || 0;
+      const p = parseFloat(inp.value) || 0;
+      const resta = p - (parseFloat(inp.dataset.reale) || 0);
+      totObbl += p;
+      const cella = inp.parentElement.querySelector('.resta-voce');
+      cella.textContent = segno(resta);
+      cella.style.color = resta >= -0.005 ? VERDE : ROSSO;
     });
-    const res  = stip - prima - totObbl;
-    const pers = parseFloat(document.getElementById('piano-persone').value) || 0;
-    const gest = res - pers;
 
-    document.getElementById('calc-entrate').textContent   = formatEur(stip);
-    document.getElementById('calc-primatete').textContent = formatEur(prima);
-    document.getElementById('calc-obbl').textContent      = formatEur(totObbl);
-    document.getElementById('tot-obbl').textContent       = formatEur(totObbl);
-    const residuoEl = document.getElementById('calc-residuo');
-    residuoEl.textContent = formatEur(res);
-    residuoEl.style.color = res >= 0 ? 'var(--blue)' : 'var(--red)';
-    const gestEl = document.getElementById('piano-gestione');
-    gestEl.textContent  = formatEur(gest);
-    gestEl.style.color  = gest >= 0 ? 'var(--text)' : 'var(--red)';
+    const residuo = stip - prima - totObbl;
+    const gest    = residuo - pers;
+
+    // Entrate e Prima te stesso: sopra zero = ancora da incassare / accantonare
+    set('r-entrate', segno(stip - realeEntrate),  stip - realeEntrate  <= 0.005 ? VERDE : ARANCIO);
+    set('r-prima',   segno(prima - realePrima),   prima - realePrima   <= 0.005 ? VERDE : ARANCIO);
+    // Uscite: sotto zero = piano superato
+    set('p-obbl',    eur0(totObbl));
+    set('r-obbl',    segno(totObbl - realeObbl),  totObbl - realeObbl  >= -0.005 ? VERDE : ROSSO);
+    set('p-residuo', eur0(residuo),               residuo >= 0 ? 'var(--blue)' : ROSSO);
+    set('r-pers',    segno(pers - realePers),     pers - realePers     >= -0.005 ? VERDE : ROSSO);
+    set('p-gest',    eur0(gest),                  gest >= 0 ? 'var(--text)' : ROSSO);
+    set('r-gest',    segno(gest - realeGest),     gest - realeGest     >= -0.005 ? VERDE : ROSSO);
   };
 
-  document.getElementById('piano-stipendio').addEventListener('input', aggiorna);
-  document.getElementById('piano-primatete').addEventListener('input', aggiorna);
-  document.getElementById('piano-persone').addEventListener('input', aggiorna);
+  ['piano-stipendio', 'piano-primatete', 'piano-persone'].forEach(id =>
+    document.getElementById(id).addEventListener('input', aggiorna));
   document.querySelectorAll('.voce-obbl').forEach(inp =>
     inp.addEventListener('input', aggiorna));
+  aggiorna();
 }
 
 // ── TAB MOVIMENTI ─────────────────────────────────────────────────────────────
