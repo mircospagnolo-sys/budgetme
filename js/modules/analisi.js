@@ -11,13 +11,18 @@ export async function init() {
   // Carica tutti i mesi dell'anno
   const mesi = await db.mesi.where('anno').equals(anno).toArray();
 
+    // Versamenti "Prima te stesso": non sono spese, restano fuori dalle uscite
+  const versPrima = await db.movimenti_voce
+    .filter(m => m.note === 'Prima te stesso').toArray();
+  const idVersPrima = new Set(versPrima.map(m => m.id));
+
   // Carica registrazioni e movimenti voce per ogni mese
   const datiMesi = await Promise.all(
     Array.from({length: 12}, async (_, i) => {
       const meseNum = i + 1;
       const mesePad = String(meseNum).padStart(2, '0');
       const dataInizio = `${anno}-${mesePad}-01`;
-      const dataFine   = new Date(anno, meseNum, 0).toISOString().split('T')[0];
+      const dataFine   = `${anno}-${mesePad}-${String(new Date(anno, meseNum, 0).getDate()).padStart(2, '0')}`;
 
       const rec = mesi.find(m => m.mese === meseNum);
       if (!rec) return { mese: meseNum, entrate: 0, uscite: 0 };
@@ -27,7 +32,8 @@ export async function init() {
         .where('data').between(dataInizio, dataFine, true, true).toArray();
 
       const entrate = movs.filter(m => m.tipo === 'entrata').reduce((s,m) => s+m.importo, 0);
-      const uscite  = movs.filter(m => m.tipo === 'uscita').reduce((s,m) => s+m.importo, 0);
+      //const uscite  = movs.filter(m => m.tipo === 'uscita').reduce((s,m) => s+m.importo, 0);
+      const uscite  = movs.filter(m => m.tipo === 'uscita' && !idVersPrima.has(m.voce_budget_id)).reduce((s,m) => s+m.importo, 0);
 
       return { mese: meseNum, entrate, uscite };
     })

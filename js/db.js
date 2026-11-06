@@ -441,35 +441,33 @@ export async function patrimonioNetto() {
   return { cc, dep, pac, totale: cc+dep+pac };
 }
 
+const TABELLE_BACKUP = [
+  'mesi','voci_uscita','voci_entrata','accantonamenti','crediti_sospeso',
+  'cedole_budget','conti_correnti','movimenti_conto','conti_deposito',
+  'vincoli_deposito','cedole_deposito','pac_etf','pac_versamenti',
+  'categorie_budget','voci_budget','registrazioni',
+  'portafogli','strumenti_portafoglio','movimenti_portafoglio','beni_reali',
+  'movimenti_voce','previsioni_mensili','riconciliazioni','piano_mensile'
+];
+
 export async function exportAllData() {
-  return {
-    version: 2,
-    exported_at: new Date().toISOString(),
-    mesi:             await db.mesi.toArray(),
-    voci_uscita:      await db.voci_uscita.toArray(),
-    voci_entrata:     await db.voci_entrata.toArray(),
-    accantonamenti:   await db.accantonamenti.toArray(),
-    crediti_sospeso:  await db.crediti_sospeso.toArray(),
-    cedole_budget:    await db.cedole_budget.toArray(),
-    conti_correnti:   await db.conti_correnti.toArray(),
-    movimenti_conto:  await db.movimenti_conto.toArray(),
-    conti_deposito:   await db.conti_deposito.toArray(),
-    cedole_deposito:  await db.cedole_deposito.toArray(),
-    pac_etf:          await db.pac_etf.toArray(),
-    pac_versamenti:   await db.pac_versamenti.toArray(),
-    categorie_budget: await db.categorie_budget.toArray(),
-    voci_budget:      await db.voci_budget.toArray(),
-    registrazioni:    await db.registrazioni.toArray()
+  const out = {
+    version: 3,
+    exported_at: new Date().toISOString()
   };
+  for (const t of TABELLE_BACKUP) {
+    out[t] = await db[t].toArray();
+  }
+  return out;
 }
 
 export async function importAllData(data) {
-  // Tabelle sempre ripristinate
-  const tabelle = [
-    'mesi','voci_uscita','voci_entrata','accantonamenti','crediti_sospeso',
-    'cedole_budget','conti_correnti','movimenti_conto','conti_deposito',
-    'cedole_deposito','pac_etf','pac_versamenti','registrazioni'
-  ];
+  // Categorie e voci: se il backup è vecchio e non le contiene,
+  // si mantengono quelle esistenti (o i default)
+  const haCategorie = !!data.categorie_budget?.length;
+  const tabelle = TABELLE_BACKUP.filter(t =>
+    haCategorie || (t !== 'categorie_budget' && t !== 'voci_budget'));
+
   await db.transaction('rw', tabelle.map(t => db[t]), async () => {
     for (const t of tabelle) {
       await db[t].clear();
@@ -477,15 +475,7 @@ export async function importAllData(data) {
     }
   });
 
-  // Categorie e voci: ripristina solo se il backup le contiene,
-  // altrimenti mantieni quelle esistenti o reinserisci i default
-  if (data.categorie_budget?.length) {
-    await db.categorie_budget.clear();
-    await db.categorie_budget.bulkAdd(data.categorie_budget);
-    await db.voci_budget.clear();
-    if (data.voci_budget?.length) await db.voci_budget.bulkAdd(data.voci_budget);
-  } else {
-    // Backup vecchio (v1) — mantieni o crea default
+  if (!haCategorie) {
     const n = await db.categorie_budget.count();
     if (n === 0) await _insertDefaults(null);
   }

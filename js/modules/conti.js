@@ -384,7 +384,8 @@ function setupFAB() {
     const btn = document.createElement('button');
     btn.id = 'btn-nuovo-conto';
     btn.setAttribute('aria-label', 'Aggiungi conto');
-    btn.innerHTML = '<i data-lucide="landmark-plus" style="width:22px;height:22px;color:var(--text-sub)"></i>';
+    // btn.innerHTML = '<i data-lucide="landmark-plus" style="width:22px;height:22px;color:var(--text-sub)"></i>';
+    btn.innerHTML = '<span style="font-size:0.8rem;font-weight:600;color:var(--blue)">+ Conto</span>';
     btn.onclick = () => {
       editingContoId = null;
       document.getElementById('modal-conto-title').textContent = 'Nuovo conto';

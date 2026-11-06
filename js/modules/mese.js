@@ -36,6 +36,12 @@ const BUSTE = {
   }
 };
 
+// Ultimo giorno del mese come 'YYYY-MM-DD', in ora locale (niente toISOString)
+function fineMese(anno, mese) {
+  const ultimo = new Date(anno, mese, 0).getDate();
+  return `${anno}-${String(mese).padStart(2, '0')}-${String(ultimo).padStart(2, '0')}`;
+}
+
 function bustaDi(voceNome, catNome) {
   for (const [busta, def] of Object.entries(BUSTE)) {
     if (def.voci.includes(voceNome)) return busta;
@@ -98,11 +104,13 @@ function setupNavMese() {
   document.getElementById('btn-prec')?.addEventListener('click', async () => {
     currentMeseNum--;
     if (currentMeseNum < 1) { currentMeseNum = 12; currentAnno--; }
+    filtroMov = { q: '', tipo: 'tutti', conto: '', daCat: false };
     await loadMese(); await renderTab();
   });
   document.getElementById('btn-succ')?.addEventListener('click', async () => {
     currentMeseNum++;
     if (currentMeseNum > 12) { currentMeseNum = 1; currentAnno++; }
+    filtroMov = { q: '', tipo: 'tutti', conto: '', daCat: false };
     await loadMese(); await renderTab();
   });
 }
@@ -162,6 +170,19 @@ async function renderPiano() {
     db.piano_mensile.where('mese_id').equals(currentMese.id).first(),
     calcolaBusteMese()
   ]);
+
+    // Versamenti "Prima te stesso" del mese (movimenti delle voci di quella busta)
+  const [catsP, vociP, movsP] = await Promise.all([
+    db.categorie_budget.toArray(),
+    db.voci_budget.toArray(),
+    db.movimenti_voce.where('mese_id').equals(currentMese.id).toArray()
+  ]);
+  const idCatP   = catsP.filter(c => BUSTE.prima.cat.includes(c.nome)).map(c => c.id);
+  const vociPMap = Object.fromEntries(
+    vociP.filter(v => idCatP.includes(v.categoria_id)).map(v => [v.id, v.nome]));
+  const versamenti = movsP
+    .filter(m => vociPMap[m.voce_id])
+    .sort((a, b) => (a.data || '').localeCompare(b.data || ''));
 
   // Modifiche manuali alle obbligazioni, salvate per nome voce
   const ovr = {};
@@ -251,6 +272,27 @@ async function renderPiano() {
              style="width:100%;box-sizing:border-box;font-size:0.78rem;padding:6px 8px;
                     border:1px solid var(--border);border-radius:6px;
                     background:var(--bg);color:var(--text)">
+            <button class="btn btn-ghost btn-full btn-sm" style="margin-top:8px"
+              onclick="window.apriVersamento()">+ Registra versamento</button>
+      ${versamenti.length ? `
+        <div style="margin-top:8px">
+          ${versamenti.map(m => `
+            <div style="display:flex;justify-content:space-between;align-items:center;
+                        padding:5px 0;border-top:1px solid var(--border);font-size:0.78rem">
+              <span style="min-width:0;overflow:hidden;text-overflow:ellipsis">
+                ${formatDate(m.data)} · ${vociPMap[m.voce_id]}
+                ${m.descrizione && m.descrizione !== vociPMap[m.voce_id]
+                  ? `<span style="color:var(--text-muted)"> · ${m.descrizione}</span>` : ''}
+              </span>
+              <span style="display:flex;align-items:center;gap:6px;flex-shrink:0">
+                <strong>${eur0(m.importo)}</strong>
+                ${m.note === 'Prima te stesso'
+                  ? `<button onclick="window.eliminaVersamento(${m.id})"
+                       style="background:none;border:none;cursor:pointer;font-size:0.8rem">🗑️</button>`
+                  : ''}
+              </span>
+            </div>`).join('')}
+        </div>` : ''}
     </div>
 
     <!-- ③ Obbligazioni fisse -->
@@ -361,19 +403,134 @@ async function renderPiano() {
 }
 
 // ── TAB MOVIMENTI ─────────────────────────────────────────────────────────────
+// Filtri e dati del mese restano in memoria: la ricerca aggiorna solo la lista,
+// così la tastiera non perde il focus.
+let filtroMov = { q: '', tipo: 'tutti', conto: '', daCat: false };
+let movMese = [];
+let contiMovMap = {};
+
+const escH = s => String(s ?? '')
+  .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+  .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+function giornoLabel(d) {
+  const s = new Date(d + 'T12:00:00')
+    .toLocaleDateString('it-IT', { weekday: 'long', day: 'numeric', month: 'long' });
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+function filtraMov() {
+  const q = filtroMov.q.trim().toLowerCase();
+  return movMese.filter(m => {
+    if (filtroMov.tipo !== 'tutti' && m.tipo !== filtroMov.tipo) return false;
+    if (filtroMov.conto && String(m.conto_id) !== filtroMov.conto) return false;
+    if (filtroMov.daCat && (m.categorizzato || m.tipo === 'trasferimento')) return false;
+    if (q) {
+      const c = contiMovMap[m.conto_id];
+      const hay = [m.descrizione, m.categoria, c?.nome,
+                   String(m.importo), String(m.importo).replace('.', ',')]
+        .join(' ').toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
+    return true;
+  });
+}
+
+function disegnaListaMov() {
+  const lista = document.getElementById('mov-lista');
+  const cont  = document.getElementById('mov-conteggio');
+  if (!lista) return;
+
+  const visibili = filtraMov();
+  const filtriAttivi = filtroMov.q.trim() || filtroMov.tipo !== 'tutti'
+                       || filtroMov.conto || filtroMov.daCat;
+  if (cont) cont.textContent = filtriAttivi
+    ? `${visibili.length} di ${movMese.length} movimenti` : '';
+
+  if (movMese.length === 0) {
+    lista.innerHTML = `<div class="empty-state" style="padding:32px">
+      <p>Nessun movimento in questo mese.<br>Tocca + per aggiungerne uno.</p></div>`;
+    return;
+  }
+  if (visibili.length === 0) {
+    lista.innerHTML = `<div class="empty-state" style="padding:32px">
+      <p>Nessun movimento corrisponde ai filtri.</p>
+      <button class="btn btn-ghost btn-sm" style="margin-top:8px"
+        onclick="window.azzeraFiltriMov()">Azzera filtri</button></div>`;
+    return;
+  }
+
+  // Raggruppa per giorno (l'ordine arriva già dal più recente)
+  const gruppi = [];
+  visibili.forEach(m => {
+    const ultimo = gruppi[gruppi.length - 1];
+    if (ultimo && ultimo.data === m.data) ultimo.righe.push(m);
+    else gruppi.push({ data: m.data, righe: [m] });
+  });
+
+  lista.innerHTML = gruppi.map(g => {
+    const netto = g.righe.reduce((s, m) =>
+      m.tipo === 'entrata' ? s + m.importo
+      : m.tipo === 'uscita' ? s - m.importo : s, 0);
+    const righe = g.righe.map(m => {
+      const c = contiMovMap[m.conto_id];
+      const isEnt = m.tipo === 'entrata', isTra = m.tipo === 'trasferimento';
+      const col   = isEnt ? 'var(--green)' : isTra ? 'var(--blue)' : 'var(--red)';
+      const segno = isEnt ? '+' : isTra ? '⇄' : '−';
+      const catOk = m.categorizzato || isTra;
+      return `
+      <div class="list-item" style="padding:10px 14px">
+        <div class="list-item-left">
+          <div style="display:flex;align-items:center;gap:6px">
+            ${!catOk ? `<span style="width:6px;height:6px;border-radius:50%;background:var(--orange);flex-shrink:0"></span>` : ''}
+            <div class="list-item-title">${escH(m.descrizione || m.categoria || '—')}</div>
+          </div>
+          <div class="list-item-sub">
+            ${c ? `<span style="color:${c.colore || 'var(--blue)'}">${escH(c.nome)}</span>` : ''}
+            ${m.categoria ? `· ${escH(m.categoria)}` : `<span style="color:var(--orange)"> · da categorizzare</span>`}
+          </div>
+        </div>
+        <div class="list-item-right">
+          <div style="font-size:0.95rem;font-weight:700;color:${col}">${segno} ${formatEur(m.importo)}</div>
+          <div style="display:flex;gap:4px;margin-top:2px;justify-content:flex-end">
+            ${!catOk ? `<button onclick="window.categorizzaMovimento(${m.id})"
+              style="font-size:0.7rem;color:var(--orange);cursor:pointer;background:none;border:none">📌</button>` : ''}
+            <button onclick="window.eliminaMovimento(${m.id})"
+              style="font-size:0.7rem;color:var(--text-muted);cursor:pointer;background:none;border:none">🗑️</button>
+          </div>
+        </div>
+      </div>`;
+    }).join('');
+
+    return `
+      <div style="display:flex;justify-content:space-between;align-items:center;
+                  padding:6px 14px;background:var(--bg);font-size:0.72rem;font-weight:700;
+                  color:var(--text-muted);border-top:1px solid var(--border)">
+        <span>${giornoLabel(g.data)}</span>
+        <span style="color:${netto >= 0 ? 'var(--green)' : 'var(--red)'}">${formatEur(netto, true)}</span>
+      </div>${righe}`;
+  }).join('');
+}
+
 async function renderMovimenti() {
   const root = document.getElementById('mese-root');
   root.innerHTML = `<div class="spinner" style="margin:24px auto"></div>`;
   const dataInizio = `${currentAnno}-${String(currentMeseNum).padStart(2,'0')}-01`;
-  const dataFine   = new Date(currentAnno, currentMeseNum, 0).toISOString().split('T')[0];
+  const dataFine   = fineMese(currentAnno, currentMeseNum);
   const [movimenti, conti] = await Promise.all([
     db.movimenti_conto.where('data').between(dataInizio, dataFine, true, true).reverse().toArray(),
     db.conti_correnti.toArray()
   ]);
-  const contiMap       = Object.fromEntries(conti.map(c => [c.id, c]));
-  const nonCat         = movimenti.filter(m => !m.categorizzato && m.tipo !== 'trasferimento');
-  const totEnt         = movimenti.filter(m => m.tipo === 'entrata').reduce((s,m) => s+m.importo, 0);
-  const totUsc         = movimenti.filter(m => m.tipo === 'uscita').reduce((s,m) => s+m.importo, 0);
+  movMese     = movimenti;
+  contiMovMap = Object.fromEntries(conti.map(c => [c.id, c]));
+
+  const nonCat = movimenti.filter(m => !m.categorizzato && m.tipo !== 'trasferimento');
+  const totEnt = movimenti.filter(m => m.tipo === 'entrata').reduce((s,m) => s+m.importo, 0);
+  const totUsc = movimenti.filter(m => m.tipo === 'uscita').reduce((s,m) => s+m.importo, 0);
+
+  const INP = 'width:100%;box-sizing:border-box;font-size:0.85rem;padding:8px 10px;' +
+              'border:1px solid var(--border);border-radius:var(--radius-sm);' +
+              'background:var(--bg-card);color:var(--text)';
 
   root.innerHTML = `
     <div class="kpi-grid" style="margin-bottom:12px">
@@ -382,54 +539,58 @@ async function renderMovimenti() {
       <div class="kpi-card"><div class="label">Uscite</div>
         <div class="value text-negative">${formatEur(totUsc)}</div></div>
     </div>
-    ${nonCat.length > 0 ? `
-    <div style="background:var(--orange-light);border-radius:var(--radius-sm);
-         padding:10px 14px;margin-bottom:12px;display:flex;
-         justify-content:space-between;align-items:center">
-      <span style="font-size:0.82rem;color:var(--orange);font-weight:600">
-        ⚠️ ${nonCat.length} movimenti senza categoria
-      </span>
-    </div>` : `
-    <div style="background:var(--green-light);border-radius:var(--radius-sm);
-         padding:8px 14px;margin-bottom:12px">
-      <span style="font-size:0.82rem;color:var(--green);font-weight:600">
-        ✓ Tutti i movimenti sono categorizzati
-      </span>
-    </div>`}
-    <div class="card" style="padding:0;overflow:hidden">
-      ${movimenti.length === 0
-        ? `<div class="empty-state" style="padding:32px"><p>Nessun movimento registrato</p></div>`
-        : movimenti.map(m => {
-            const c = contiMap[m.conto_id];
-            const isEnt = m.tipo === 'entrata', isTra = m.tipo === 'trasferimento';
-            const col   = isEnt ? 'var(--green)' : isTra ? 'var(--blue)' : 'var(--red)';
-            const segno = isEnt ? '+' : isTra ? '⇄' : '−';
-            const catOk = m.categorizzato || isTra;
-            return `
-            <div class="list-item" style="padding:10px 14px">
-              <div class="list-item-left">
-                <div style="display:flex;align-items:center;gap:6px">
-                  ${!catOk?`<span style="width:6px;height:6px;border-radius:50%;background:var(--orange);flex-shrink:0"></span>`:''}
-                  <div class="list-item-title">${m.descrizione||m.categoria||'—'}</div>
-                </div>
-                <div class="list-item-sub">
-                  ${formatDate(m.data)}
-                  ${c?`· <span style="color:${c.colore||'var(--blue)'}">${c.nome}</span>`:''}
-                  ${m.categoria?`· ${m.categoria}`:`<span style="color:var(--orange)"> · da categorizzare</span>`}
-                </div>
-              </div>
-              <div class="list-item-right">
-                <div style="font-size:0.95rem;font-weight:700;color:${col}">${segno} ${formatEur(m.importo)}</div>
-                <div style="display:flex;gap:4px;margin-top:2px;justify-content:flex-end">
-                  ${!catOk?`<button onclick="window.categorizzaMovimento(${m.id})"
-                    style="font-size:0.7rem;color:var(--orange);cursor:pointer;background:none;border:none">📌</button>`:''}
-                  <button onclick="window.eliminaMovimento(${m.id})"
-                    style="font-size:0.7rem;color:var(--text-muted);cursor:pointer;background:none;border:none">🗑️</button>
-                </div>
-              </div>
-            </div>`;
-          }).join('')}
-    </div>`;
+
+    <input type="search" id="mov-cerca" value="${escH(filtroMov.q)}"
+           placeholder="Cerca per descrizione, categoria, conto o importo"
+           style="${INP};margin-bottom:8px">
+
+    <div class="tabs" id="mov-tipo-tabs" style="margin-bottom:8px">
+      ${[['tutti','Tutti'],['uscita','Uscite'],['entrata','Entrate'],['trasferimento','Trasf.']]
+        .map(([k, l]) => `<button class="tab-btn ${filtroMov.tipo === k ? 'active' : ''}"
+          data-f="${k}">${l}</button>`).join('')}
+    </div>
+
+    <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
+      ${conti.length > 1 ? `
+      <select id="mov-conto" style="${INP};flex:1">
+        <option value="">Tutti i conti</option>
+        ${conti.map(c => `<option value="${c.id}" ${String(c.id) === filtroMov.conto ? 'selected' : ''}>${escH(c.nome)}</option>`).join('')}
+      </select>` : ''}
+      ${nonCat.length > 0 ? `
+      <button id="mov-dacat" class="btn btn-sm ${filtroMov.daCat ? 'btn-primary' : 'btn-ghost'}"
+              style="white-space:nowrap">⚠️ Da categorizzare (${nonCat.length})</button>` : `
+      <span style="font-size:0.8rem;color:var(--green);font-weight:600;white-space:nowrap">
+        ✓ Tutti categorizzati</span>`}
+    </div>
+
+    <div id="mov-conteggio" style="font-size:0.75rem;color:var(--text-muted);
+         margin-bottom:6px;min-height:1em"></div>
+
+    <div class="card" style="padding:0;overflow:hidden" id="mov-lista"></div>`;
+
+  document.getElementById('mov-cerca').addEventListener('input', e => {
+    filtroMov.q = e.target.value;
+    disegnaListaMov();
+  });
+  document.querySelectorAll('#mov-tipo-tabs .tab-btn').forEach(btn =>
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('#mov-tipo-tabs .tab-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      filtroMov.tipo = btn.dataset.f;
+      disegnaListaMov();
+    }));
+  document.getElementById('mov-conto')?.addEventListener('change', e => {
+    filtroMov.conto = e.target.value;
+    disegnaListaMov();
+  });
+  document.getElementById('mov-dacat')?.addEventListener('click', e => {
+    filtroMov.daCat = !filtroMov.daCat;
+    e.currentTarget.classList.toggle('btn-primary', filtroMov.daCat);
+    e.currentTarget.classList.toggle('btn-ghost', !filtroMov.daCat);
+    disegnaListaMov();
+  });
+
+  disegnaListaMov();
   setupFAB(); lucide.createIcons();
 }
 
@@ -556,7 +717,7 @@ async function renderRiconciliazione() {
   const conti = await db.conti_correnti.where('attivo').equals(1).toArray();
   const saldoApertura = currentMese.saldo_apertura ?? await calcolaSaldoApertura();
   const dataInizio = `${currentAnno}-${String(currentMeseNum).padStart(2,'0')}-01`;
-  const dataFine   = new Date(currentAnno, currentMeseNum, 0).toISOString().split('T')[0];
+  const dataFine   = fineMese(currentAnno, currentMeseNum);
   const movimenti  = await db.movimenti_conto
     .where('data').between(dataInizio, dataFine, true, true).toArray();
   const totEnt = movimenti.filter(m => m.tipo==='entrata').reduce((s,m)=>s+m.importo,0);
@@ -650,80 +811,106 @@ async function renderRiconciliazione() {
 
 // ── MODAL NUOVO MOVIMENTO ─────────────────────────────────────────────────────
 async function apriNuovoMovimento() {
-  let modal = document.getElementById('modal-nm');
-  if (!modal) {
-    const conti = await db.conti_correnti.where('attivo').equals(1).toArray();
-    const cats  = await db.categorie_budget.orderBy('ordine').toArray();
-    modal = document.createElement('div');
-    modal.id = 'modal-nm'; modal.className = 'modal-overlay hidden';
-    modal.innerHTML = `
-      <div class="modal">
-        <div class="modal-header">
-          <h2 class="modal-title">Nuovo movimento</h2>
-          <button class="modal-close" onclick="window.chiudiNM()"><i data-lucide="x"></i></button>
-        </div>
-        <div class="tabs" id="nm-tipo-tabs">
-          <button class="tab-btn active" data-tipo="uscita">Uscita</button>
-          <button class="tab-btn" data-tipo="entrata">Entrata</button>
-          <button class="tab-btn" data-tipo="trasferimento">Trasf.</button>
-        </div>
-        <div class="form-row" style="margin-top:12px">
-          <div class="form-group">
-            <div class="label">Data *</div>
-            <input type="date" id="nm-data" value="${today()}">
-          </div>
-          <div class="form-group">
-            <div class="label">Importo (€) *</div>
-            <input type="number" id="nm-importo" placeholder="0.00" step="0.01" inputmode="decimal">
-          </div>
-        </div>
-        <div class="form-group">
-          <div class="label">Conto *</div>
-          <select id="nm-conto">${conti.map(c=>`<option value="${c.id}">${c.nome}</option>`).join('')}</select>
-        </div>
-        <div class="form-group" id="nm-dest-wrap" style="display:none">
-          <div class="label">Conto destinazione</div>
-          <select id="nm-conto-dest">${conti.map(c=>`<option value="${c.id}">${c.nome}</option>`).join('')}</select>
-        </div>
-        <div class="form-group">
-          <div class="label">Categoria budget</div>
-          <select id="nm-cat">
-            <option value="">— nessuna —</option>
-            ${cats.filter(c=>c.tipo==='uscita').map(c=>`<option value="${c.nome}">${c.nome}</option>`).join('')}
-          </select>
-        </div>
-        <div class="form-group">
-          <div class="label">Descrizione</div>
-          <input type="text" id="nm-desc" placeholder="es. CONAD, Stipendio...">
-        </div>
-        <div class="form-actions">
-          <button class="btn btn-ghost" onclick="window.chiudiNM()">Annulla</button>
-          <button class="btn btn-primary" onclick="window.salvaNM()">Salva</button>
-        </div>
-      </div>`;
-    document.body.appendChild(modal);
-    const updateCats = (tipo) => {
-      const sel = document.getElementById('nm-cat');
-      const f = tipo==='entrata' ? cats.filter(c=>c.tipo==='entrata') : cats.filter(c=>c.tipo==='uscita');
-      sel.innerHTML = '<option value="">— nessuna —</option>' +
-        f.map(c=>`<option value="${c.nome}">${c.nome}</option>`).join('');
-    };
-    document.querySelectorAll('#nm-tipo-tabs .tab-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
-        document.querySelectorAll('#nm-tipo-tabs .tab-btn').forEach(b=>b.classList.remove('active'));
-        btn.classList.add('active');
-        const tipo = btn.dataset.tipo;
-        document.getElementById('nm-dest-wrap').style.display = tipo==='trasferimento'?'':'none';
-        updateCats(tipo);
-      });
-    });
-    modal.addEventListener('click', e => { if (e.target===modal) window.chiudiNM(); });
+  const [conti, cats, voci] = await Promise.all([
+    db.conti_correnti.where('attivo').equals(1).toArray(),
+    db.categorie_budget.orderBy('ordine').toArray(),
+    db.voci_budget.where('attiva').equals(1).toArray()
+  ]);
+  if (conti.length === 0) {
+    alert('Aggiungi prima un conto in Patrimonio → Conti.');
+    return;
   }
+
+  // Un solo menu: voci raggruppate per categoria, filtrate per tipo
+  const opzioniVoci = tipo => {
+    const tipoCat = tipo === 'entrata' ? 'entrata' : 'uscita';
+    const gruppi = cats.filter(c => c.tipo === tipoCat && c.attiva).map(c => {
+      const vs = voci.filter(v => v.categoria_id === c.id)
+        .sort((a, b) => (a.ordine || 0) - (b.ordine || 0));
+      return vs.length
+        ? `<optgroup label="${escH(c.nome)}">${vs.map(v =>
+            `<option value="${v.id}">${escH(v.nome)}</option>`).join('')}</optgroup>`
+        : '';
+    }).join('');
+    return `<option value="">— nessuna (da categorizzare) —</option>${gruppi}`;
+  };
+
+  // Data proposta: oggi se cade nel mese visualizzato, altrimenti il primo del mese
+  const mesePad = String(currentMeseNum).padStart(2, '0');
+  const dataDefault = today().startsWith(`${currentAnno}-${mesePad}`)
+    ? today() : `${currentAnno}-${mesePad}-01`;
+
+  const optConti = conti.map(c => `<option value="${c.id}">${escH(c.nome)}</option>`).join('');
+
+  document.getElementById('modal-nm')?.remove();
+  const modal = document.createElement('div');
+  modal.id = 'modal-nm'; modal.className = 'modal-overlay hidden';
+  modal.innerHTML = `
+    <div class="modal">
+      <div class="modal-header">
+        <h2 class="modal-title">Nuovo movimento</h2>
+        <button class="modal-close" onclick="window.chiudiNM()"><i data-lucide="x"></i></button>
+      </div>
+      <div class="tabs" id="nm-tipo-tabs">
+        <button class="tab-btn active" data-tipo="uscita">Uscita</button>
+        <button class="tab-btn" data-tipo="entrata">Entrata</button>
+        <button class="tab-btn" data-tipo="trasferimento">Trasf.</button>
+      </div>
+      <div class="form-row" style="margin-top:12px">
+        <div class="form-group">
+          <div class="label">Importo (€) *</div>
+          <input type="number" id="nm-importo" placeholder="0.00" step="0.01" inputmode="decimal"
+                 style="font-size:1.3rem;font-weight:700">
+        </div>
+        <div class="form-group">
+          <div class="label">Data *</div>
+          <input type="date" id="nm-data" value="${dataDefault}">
+        </div>
+      </div>
+      <div class="form-group">
+        <div class="label">Descrizione</div>
+        <input type="text" id="nm-desc" placeholder="es. CONAD, Stipendio...">
+      </div>
+      <div class="form-group" id="nm-voce-wrap">
+        <div class="label">Voce di budget</div>
+        <select id="nm-voce">${opzioniVoci('uscita')}</select>
+      </div>
+      <div class="form-group">
+        <div class="label">Conto *</div>
+        <select id="nm-conto">${optConti}</select>
+      </div>
+      <div class="form-group" id="nm-dest-wrap" style="display:none">
+        <div class="label">Conto destinazione</div>
+        <select id="nm-conto-dest">${optConti}</select>
+      </div>
+      <div class="form-actions">
+        <button class="btn btn-ghost" onclick="window.chiudiNM()">Annulla</button>
+        <button class="btn btn-ghost" onclick="window.salvaNM(true)">Salva e nuovo</button>
+        <button class="btn btn-primary" onclick="window.salvaNM()">Salva</button>
+      </div>
+    </div>`;
+  document.body.appendChild(modal);
+
+  document.querySelectorAll('#nm-tipo-tabs .tab-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('#nm-tipo-tabs .tab-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      const tipo = btn.dataset.tipo;
+      const isTra = tipo === 'trasferimento';
+      document.getElementById('nm-dest-wrap').style.display = isTra ? '' : 'none';
+      document.getElementById('nm-voce-wrap').style.display = isTra ? 'none' : '';
+      document.getElementById('nm-voce').innerHTML = opzioniVoci(tipo);
+    });
+  });
+  ['nm-importo', 'nm-desc'].forEach(id =>
+    document.getElementById(id).addEventListener('keydown', e => {
+      if (e.key === 'Enter') window.salvaNM();
+    }));
+  modal.addEventListener('click', e => { if (e.target === modal) window.chiudiNM(); });
+
   modal.classList.remove('hidden');
   requestAnimationFrame(() => modal.classList.add('open'));
-  document.getElementById('nm-importo').value = '';
-  document.getElementById('nm-desc').value = '';
-  document.getElementById('nm-data').value = today();
+  setTimeout(() => document.getElementById('nm-importo')?.focus(), 300);
   lucide.createIcons();
 }
 
@@ -899,31 +1086,72 @@ function setupGlobals() {
   window.categorizzaMovimento = categorizzaMovimento;
   window.apriVoce            = apriVoce;
 
+  window.azzeraFiltriMov = async () => {
+    filtroMov = { q: '', tipo: 'tutti', conto: '', daCat: false };
+    await renderMovimenti();
+  };
+
   window.chiudiNM = () => {
     const m = document.getElementById('modal-nm');
     if (m) { m.classList.remove('open'); setTimeout(()=>m.classList.add('hidden'),250); }
   };
 
-  window.salvaNM = async () => {
-    const tipo    = document.querySelector('#nm-tipo-tabs .tab-btn.active')?.dataset.tipo||'uscita';
+    window.salvaNM = async (continua = false) => {
+    const tipo    = document.querySelector('#nm-tipo-tabs .tab-btn.active')?.dataset.tipo || 'uscita';
     const importo = parseFloat(document.getElementById('nm-importo').value);
     const data    = document.getElementById('nm-data').value;
     const contoId = parseInt(document.getElementById('nm-conto').value);
-    const cat     = document.getElementById('nm-cat').value;
     const desc    = document.getElementById('nm-desc').value.trim();
-    const destId  = tipo==='trasferimento'?parseInt(document.getElementById('nm-conto-dest').value):null;
-    if (!importo||importo<=0||!data||!contoId){alert('Inserisci data, importo e conto');return;}
+    const isTra   = tipo === 'trasferimento';
+    const voceId  = isTra ? null : (parseInt(document.getElementById('nm-voce').value) || null);
+    const destId  = isTra ? parseInt(document.getElementById('nm-conto-dest').value) : null;
+
+    if (!importo || importo <= 0 || !data || !contoId) {
+      alert('Inserisci data, importo e conto'); return;
+    }
+    if (isTra && destId === contoId) {
+      alert('Scegli due conti diversi'); return;
+    }
+
+    // 1) se c'è una voce, il movimento entra anche nel Budget del mese giusto
+    let voce = null, movVoceId = null;
+    if (voceId) {
+      voce = await db.voci_budget.get(voceId);
+      const meseRec = await getOrCreateMese(parseInt(data.slice(0, 4)), parseInt(data.slice(5, 7)));
+      movVoceId = await db.movimenti_voce.add({
+        voce_id: voceId, mese_id: meseRec.id, data, importo: Math.abs(importo),
+        modalita: tipo === 'entrata' ? 'bonifico' : 'pos',
+        descrizione: desc || voce.nome, note: 'Da movimento bancario'
+      });
+    }
+
+    // 2) movimento sul conto, collegato al movimento di budget
     await db.movimenti_conto.add({
-      conto_id:contoId, data, tipo, importo:Math.abs(importo),
-      descrizione:desc, categoria:cat||null, conto_dest_id:destId, categorizzato:cat?1:0
+      conto_id: contoId, data, tipo, importo: Math.abs(importo),
+      descrizione: desc, categoria: voce ? voce.nome : null,
+      conto_dest_id: destId, categorizzato: voce ? 1 : 0,
+      voce_budget_id: movVoceId
     });
-    window.chiudiNM();
-    toast('Movimento salvato','success');
+
+    toast('Movimento salvato', 'success');
+    if (continua) {
+      // Resta aperto: tiene tipo, data e conto, svuota il resto
+      document.getElementById('nm-importo').value = '';
+      document.getElementById('nm-desc').value = '';
+      const sel = document.getElementById('nm-voce');
+      if (sel) sel.value = '';
+      document.getElementById('nm-importo').focus();
+    } else {
+      window.chiudiNM();
+    }
     await renderMovimenti();
   };
 
   window.eliminaMovimento = async (id) => {
     if (!confirm('Eliminare questo movimento?')) return;
+    const mov = await db.movimenti_conto.get(id);
+    // Se è collegato al Budget, rimuove anche il movimento di voce
+    if (mov?.voce_budget_id) await db.movimenti_voce.delete(mov.voce_budget_id);
     await db.movimenti_conto.delete(id);
     toast('Eliminato');
     await renderMovimenti();
@@ -1048,4 +1276,125 @@ window.salvaPiano = async () => {
 
   toast('Piano salvato ✓', 'success');
 };
+
+  // ── PRIMA TE STESSO: registra versamento ───────────────────────────────────
+  window.apriVersamento = async () => {
+    const [conti, cats, voci] = await Promise.all([
+      db.conti_correnti.where('attivo').equals(1).toArray(),
+      db.categorie_budget.toArray(),
+      db.voci_budget.where('attiva').equals(1).toArray()
+    ]);
+    const idCat = cats.filter(c => BUSTE.prima.cat.includes(c.nome)).map(c => c.id);
+    const vociPrima = voci.filter(v => idCat.includes(v.categoria_id));
+    if (vociPrima.length === 0) {
+      alert('Nessuna voce trovata nelle categorie di "Prima te stesso". Controlla i nomi in BUSTE.');
+      return;
+    }
+
+    // Data proposta: oggi se cade nel mese visualizzato, altrimenti il primo del mese
+    const mesePad = String(currentMeseNum).padStart(2, '0');
+    const dataDefault = today().startsWith(`${currentAnno}-${mesePad}`)
+      ? today() : `${currentAnno}-${mesePad}-01`;
+
+    document.getElementById('modal-versamento')?.remove();
+    const modal = document.createElement('div');
+    modal.id = 'modal-versamento';
+    modal.className = 'modal-overlay hidden';
+    modal.innerHTML = `
+      <div class="modal">
+        <div class="modal-header">
+          <h2 class="modal-title">Registra versamento</h2>
+          <button class="modal-close" onclick="window.chiudiVersamento()">
+            <i data-lucide="x"></i>
+          </button>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <div class="label">Data *</div>
+            <input type="date" id="vp-data" value="${dataDefault}">
+          </div>
+          <div class="form-group">
+            <div class="label">Importo (€) *</div>
+            <input type="number" id="vp-importo" placeholder="0.00" step="0.01" inputmode="decimal">
+          </div>
+        </div>
+        <div class="form-group">
+          <div class="label">Destinazione *</div>
+          <select id="vp-voce">
+            ${vociPrima.map(v => `<option value="${v.id}">${v.nome}</option>`).join('')}
+          </select>
+        </div>
+        <div class="form-group">
+          <div class="label">Conto di addebito</div>
+          <select id="vp-conto">
+            <option value="">— nessuno: solo budget —</option>
+            ${conti.map(c => `<option value="${c.id}">${c.nome}</option>`).join('')}
+          </select>
+        </div>
+        <div class="form-group">
+          <div class="label">Nota</div>
+          <input type="text" id="vp-nota" placeholder="es. PAC mensile Trade Republic">
+        </div>
+        <div class="form-actions">
+          <button class="btn btn-ghost" onclick="window.chiudiVersamento()">Annulla</button>
+          <button class="btn btn-primary" onclick="window.salvaVersamento()">Salva</button>
+        </div>
+      </div>`;
+    document.body.appendChild(modal);
+    modal.addEventListener('click', e => { if (e.target === modal) window.chiudiVersamento(); });
+    modal.classList.remove('hidden');
+    requestAnimationFrame(() => modal.classList.add('open'));
+    lucide.createIcons();
+  };
+
+  window.chiudiVersamento = () => {
+    const m = document.getElementById('modal-versamento');
+    if (!m) return;
+    m.classList.remove('open');
+    setTimeout(() => m.remove(), 250);
+  };
+
+  window.salvaVersamento = async () => {
+    const importo = parseFloat(document.getElementById('vp-importo').value);
+    const data    = document.getElementById('vp-data').value;
+    const voceId  = parseInt(document.getElementById('vp-voce').value);
+    const contoId = parseInt(document.getElementById('vp-conto').value) || null;
+    const nota    = document.getElementById('vp-nota').value.trim();
+    if (!importo || importo <= 0 || !data || !voceId) {
+      alert('Inserisci data, importo e destinazione');
+      return;
+    }
+
+    const voce    = await db.voci_budget.get(voceId);
+    const meseRec = await getOrCreateMese(parseInt(data.slice(0, 4)), parseInt(data.slice(5, 7)));
+
+    // 1) movimento sulla voce di budget (alimenta la colonna Reale)
+    const movVoceId = await db.movimenti_voce.add({
+      voce_id: voceId, mese_id: meseRec.id, data, importo,
+      modalita: 'bonifico', descrizione: nota || voce.nome,
+      note: 'Prima te stesso'
+    });
+
+    // 2) uscita sul conto, collegata al movimento di budget
+    if (contoId) {
+      await db.movimenti_conto.add({
+        conto_id: contoId, data, tipo: 'uscita', importo,
+        descrizione: nota || voce.nome, categoria: voce.nome,
+        conto_dest_id: null, categorizzato: 1,
+        voce_budget_id: movVoceId
+      });
+    }
+
+    window.chiudiVersamento();
+    toast('Versamento registrato ✓', 'success');
+    await renderPiano();
+  };
+
+  window.eliminaVersamento = async (movVoceId) => {
+    if (!confirm('Eliminare questo versamento? Verrà rimosso anche dal conto collegato.')) return;
+    await db.movimenti_conto.filter(m => m.voce_budget_id === movVoceId).delete();
+    await db.movimenti_voce.delete(movVoceId);
+    toast('Versamento eliminato');
+    await renderPiano();
+  };
 }
