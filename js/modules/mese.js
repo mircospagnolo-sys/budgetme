@@ -916,91 +916,75 @@ async function apriNuovoMovimento() {
 
 // ── MODAL CATEGORIZZA ─────────────────────────────────────────────────────────
 async function categorizzaMovimento(movId) {
-  const mov  = await db.movimenti_conto.get(movId);
-  const cats = await db.categorie_budget.orderBy('ordine').toArray();
-  let modal = document.getElementById('modal-cat-mov');
-  if (modal) modal.remove();
-  modal = document.createElement('div');
+  const [mov, cats, voci, categorizzati] = await Promise.all([
+    db.movimenti_conto.get(movId),
+    db.categorie_budget.orderBy('ordine').toArray(),
+    db.voci_budget.where('attiva').equals(1).toArray(),
+    db.movimenti_conto.filter(m => m.categorizzato && m.id !== movId).toArray()
+  ]);
+  if (!mov) return;
+
+  // Suggerimento: ultima voce usata per la stessa descrizione
+  const desc = (mov.descrizione || '').trim().toLowerCase();
+  let suggerita = null;
+  if (desc) {
+    const simile = categorizzati
+      .filter(m => (m.descrizione || '').trim().toLowerCase() === desc)
+      .sort((a, b) => (b.data || '').localeCompare(a.data || ''))[0];
+    suggerita = voci.find(v => v.nome === simile?.categoria)?.id || null;
+  }
+
+  const tipoCat = mov.tipo === 'entrata' ? 'entrata' : 'uscita';
+  const gruppi = cats.filter(c => c.tipo === tipoCat && c.attiva).map(c => {
+    const vs = voci.filter(v => v.categoria_id === c.id)
+      .sort((a, b) => (a.ordine || 0) - (b.ordine || 0));
+    return vs.length
+      ? `<optgroup label="${escH(c.nome)}">${vs.map(v =>
+          `<option value="${v.id}" ${v.id === suggerita ? 'selected' : ''}>${escH(v.nome)}</option>`
+        ).join('')}</optgroup>`
+      : '';
+  }).join('');
+
+  const ancoraDaFare = movMese.filter(m => !m.categorizzato && m.tipo !== 'trasferimento').length;
+
+  document.getElementById('modal-cat-mov')?.remove();
+  const modal = document.createElement('div');
   modal.id = 'modal-cat-mov'; modal.className = 'modal-overlay hidden';
   modal.innerHTML = `
     <div class="modal">
       <div class="modal-header">
         <h2 class="modal-title">Categorizza</h2>
-        <button class="modal-close" onclick="this.closest('.modal-overlay').classList.add('hidden')">
+        <button class="modal-close" onclick="this.closest('.modal-overlay').remove()">
           <i data-lucide="x"></i>
         </button>
       </div>
       <div style="background:var(--bg);border-radius:var(--radius-sm);padding:10px 12px;margin-bottom:12px">
-        <div style="font-weight:600">${mov.descrizione||'—'}</div>
-        <div style="font-size:0.82rem;color:var(--text-muted)">${formatDate(mov.data)} · ${formatEur(mov.importo)}</div>
+        <div style="font-weight:600">${escH(mov.descrizione || '—')}</div>
+        <div style="font-size:0.82rem;color:var(--text-muted)">
+          ${formatDate(mov.data)} · ${mov.tipo === 'entrata' ? '+' : '−'} ${formatEur(mov.importo)}
+        </div>
       </div>
       <div class="form-group">
-        <div class="label">Categoria</div>
-        <select id="cat-mov-sel" onchange="window.aggiornaSelezioneVoci(this.value)">
-  <option value="">— nessuna —</option>
-  ${cats.map(c => `<option value="${c.nome}">${c.nome} (${c.tipo})</option>`).join('')}
-</select>
-<div id="voce-sel-wrap" style="display:none">
-  <div class="label" style="margin-top:8px">Voce specifica (opzionale)</div>
-  <select id="cat-nome-sel"></select>
-</div>
+        <div class="label">Voce di budget</div>
+        <select id="cat-voce-sel">
+          <option value="">— scegli —</option>${gruppi}
+        </select>
+        ${suggerita ? `<div style="font-size:0.72rem;color:var(--text-muted);margin-top:4px">
+          Suggerita: hai già usato questa voce per una descrizione uguale.</div>` : ''}
       </div>
       <div class="form-actions">
-        <button class="btn btn-ghost" onclick="this.closest('.modal-overlay').classList.add('hidden')">Annulla</button>
+        <button class="btn btn-ghost" onclick="this.closest('.modal-overlay').remove()">Annulla</button>
+        ${ancoraDaFare > 1 ? `<button class="btn btn-ghost"
+          onclick="window.salvaCatMov(${movId}, true)">Salva e prossimo</button>` : ''}
         <button class="btn btn-primary" onclick="window.salvaCatMov(${movId})">Salva</button>
       </div>
     </div>`;
   document.body.appendChild(modal);
+  modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
   modal.classList.remove('hidden');
   requestAnimationFrame(() => modal.classList.add('open'));
   lucide.createIcons();
 }
-
-window.salvaCategorizza = async (movId) => {
-  const cat     = document.getElementById('cat-sel').value;
-  const nomeCat = document.getElementById('cat-nome-sel')?.value || '';
-  
-  await db.movimenti_conto.update(movId, {
-    categoria: cat, categorizzato: cat ? 1 : 0
-  });
-
-  // Collegamento automatico → budget
-  if (cat && nomeCat) {
-    const mov = await db.movimenti_conto.get(movId);
-    if (mov && mov.tipo !== 'trasferimento') {
-      // Trova la voce budget corrispondente al nome categoria
-      const voci = await db.voci_budget.toArray();
-      const voce = voci.find(v => v.nome === nomeCat);
-      if (voce) {
-        // Trova o crea il mese corretto
-        const data = mov.data; // es. "2026-07-08"
-        const anno = parseInt(data.slice(0,4));
-        const mese = parseInt(data.slice(5,7));
-        const meseRec = await getOrCreateMese(anno, mese);
-        // Verifica che non esista già un movimento voce uguale
-        const existing = await db.movimenti_voce
-          .where({ voce_id: voce.id, mese_id: meseRec.id })
-          .filter(m => m.descrizione === (mov.descrizione||'') && m.importo === mov.importo)
-          .first();
-        if (!existing) {
-          await db.movimenti_voce.add({
-            voce_id:     voce.id,
-            mese_id:     meseRec.id,
-            data:        mov.data,
-            importo:     mov.importo,
-            modalita:    'bonifico',
-            descrizione: mov.descrizione || cat,
-            note:        'Da movimento bancario'
-          });
-        }
-      }
-    }
-  }
-
-  document.getElementById('modal-categorizza')?.classList.add('hidden');
-  toast('Categoria salvata e budget aggiornato', 'success');
-  await renderMovimenti();
-};
 
 // ── MODAL VOCE BUDGET ─────────────────────────────────────────────────────────
 async function apriVoce(voceId, voceName, prevDefault) {
@@ -1157,12 +1141,38 @@ function setupGlobals() {
     await renderMovimenti();
   };
 
-  window.salvaCatMov = async (movId) => {
-    const cat = document.getElementById('cat-mov-sel').value;
-    await db.movimenti_conto.update(movId,{categoria:cat,categorizzato:cat?1:0});
-    document.getElementById('modal-cat-mov')?.classList.add('hidden');
-    toast('Categoria salvata','success');
+    window.salvaCatMov = async (movId, prossimo = false) => {
+    const voceId = parseInt(document.getElementById('cat-voce-sel').value) || null;
+    if (!voceId) { alert('Scegli una voce di budget'); return; }
+
+    const [mov, voce] = await Promise.all([
+      db.movimenti_conto.get(movId),
+      db.voci_budget.get(voceId)
+    ]);
+    if (!mov || !voce) return;
+
+    // Se era già collegato a un'altra voce, toglie il vecchio collegamento
+    if (mov.voce_budget_id) await db.movimenti_voce.delete(mov.voce_budget_id);
+
+    const meseRec = await getOrCreateMese(
+      parseInt(mov.data.slice(0, 4)), parseInt(mov.data.slice(5, 7)));
+    const movVoceId = await db.movimenti_voce.add({
+      voce_id: voceId, mese_id: meseRec.id, data: mov.data, importo: mov.importo,
+      modalita: mov.tipo === 'entrata' ? 'bonifico' : 'pos',
+      descrizione: mov.descrizione || voce.nome, note: 'Da movimento bancario'
+    });
+    await db.movimenti_conto.update(movId, {
+      categoria: voce.nome, categorizzato: 1, voce_budget_id: movVoceId
+    });
+
+    document.getElementById('modal-cat-mov')?.remove();
+    toast('Categoria salvata e budget aggiornato', 'success');
     await renderMovimenti();
+
+    if (prossimo) {
+      const next = movMese.find(m => !m.categorizzato && m.tipo !== 'trasferimento');
+      if (next) await window.categorizzaMovimento(next.id);
+    }
   };
 
   window.salvaVoce = async (voceId, prevDefault) => {
@@ -1230,21 +1240,6 @@ function setupGlobals() {
     await renderStatoBadge();
     await renderRiconciliazione();
   };
-
-  window.aggiornaSelezioneVoci = async (catNome) => {
-  const wrap = document.getElementById('voce-sel-wrap');
-  const sel  = document.getElementById('cat-nome-sel');
-  if (!catNome || !wrap || !sel) return;
-  const cats = await db.categorie_budget.toArray();
-  const cat  = cats.find(c => c.nome === catNome);
-  if (!cat) { wrap.style.display = 'none'; return; }
-  const voci = await db.voci_budget
-    .where('categoria_id').equals(cat.id).toArray();
-  sel.innerHTML = voci.map(v =>
-    `<option value="${v.nome}">${v.nome}</option>`
-  ).join('');
-  wrap.style.display = voci.length > 0 ? '' : 'none';
-};
 
 window.salvaPiano = async () => {
   const stipendio  = parseFloat(document.getElementById('piano-stipendio').value) || 0;

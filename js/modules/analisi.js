@@ -2,74 +2,123 @@
 import db from '../db.js';
 import { formatEur, MESI_NOMI } from '../utils.js';
 
+// ── CONFIGURAZIONE ───────────────────────────────────────────────────────────
+// Categorie che non sono spese: restano fuori dalle uscite e da "Top categorie"
+const CAT_NON_SPESA = ['Risparmio e Liquidità', 'Investimento Lungo Termine'];
+// Nomi usati in passato dal modulo Conti per risparmio e investimenti
+const NOMI_LEGACY_NON_SPESA = ['Risparmio', 'Investimento PAC'];
+// Entrate una tantum (assegni, vendite, regali): fuori da media e tasso di risparmio
+const CAT_ENTRATE_STRAORD = ['Entrate Straordinarie'];
+
+const somma = righe => righe.reduce((s, m) => s + m.importo, 0);
+
 export async function init() {
   const root = document.getElementById('analisi-root');
   root.innerHTML = `<div class="spinner" style="margin:32px auto"></div>`;
 
   const anno = new Date().getFullYear();
 
-  // Carica tutti i mesi dell'anno
-  const mesi = await db.mesi.where('anno').equals(anno).toArray();
+  const [mesi, cats, voci, regs, movsVoce] = await Promise.all([
+    db.mesi.where('anno').equals(anno).toArray(),
+    db.categorie_budget.toArray(),
+    db.voci_budget.toArray(),
+    db.registrazioni.toArray(),
+    db.movimenti_voce.toArray()
+  ]);
 
-    // Versamenti "Prima te stesso": non sono spese, restano fuori dalle uscite
-  const versPrima = await db.movimenti_voce
-    .filter(m => m.note === 'Prima te stesso').toArray();
-  const idVersPrima = new Set(versPrima.map(m => m.id));
+  // ── Riconoscimento di risparmio/investimenti e di entrate straordinarie ──
+  const idCatNonSpesa = new Set(cats.filter(c => CAT_NON_SPESA.includes(c.nome)).map(c => c.id));
+  const idCatStraord  = new Set(cats.filter(c => CAT_ENTRATE_STRAORD.includes(c.nome)).map(c => c.id));
+  const vociNonSpesa  = voci.filter(v => idCatNonSpesa.has(v.categoria_id));
+  const vociStraord   = voci.filter(v => idCatStraord.has(v.categoria_id));
 
-  // Carica registrazioni e movimenti voce per ogni mese
+  const nomiNonSpesa = new Set([...CAT_NON_SPESA, ...NOMI_LEGACY_NON_SPESA,
+                                ...vociNonSpesa.map(v => v.nome)]);
+  const nomiStraord  = new Set([...CAT_ENTRATE_STRAORD, ...vociStraord.map(v => v.nome)]);
+
+  const idVoceNonSpesa = new Set(vociNonSpesa.map(v => v.id));
+  const idVoceStraord  = new Set(vociStraord.map(v => v.id));
+
+  // Un movimento del conto è collegato al Budget tramite voce_budget_id
+  // (= id del movimento voce); in mancanza, si guarda il nome della categoria
+  const idMovNonSpesa = new Set(movsVoce
+    .filter(m => idVoceNonSpesa.has(m.voce_id) || m.note === 'Prima te stesso')
+    .map(m => m.id));
+  const idMovStraord = new Set(movsVoce
+    .filter(m => idVoceStraord.has(m.voce_id)).map(m => m.id));
+
+  const isNonSpesa = m => idMovNonSpesa.has(m.voce_budget_id) || nomiNonSpesa.has(m.categoria);
+  const isStraord  = m => idMovStraord.has(m.voce_budget_id)  || nomiStraord.has(m.categoria);
+
+  // ── Dati mensili dai movimenti dei conti ──
   const datiMesi = await Promise.all(
-    Array.from({length: 12}, async (_, i) => {
+    Array.from({ length: 12 }, async (_, i) => {
       const meseNum = i + 1;
       const mesePad = String(meseNum).padStart(2, '0');
       const dataInizio = `${anno}-${mesePad}-01`;
       const dataFine   = `${anno}-${mesePad}-${String(new Date(anno, meseNum, 0).getDate()).padStart(2, '0')}`;
 
-      const rec = mesi.find(m => m.mese === meseNum);
-      if (!rec) return { mese: meseNum, entrate: 0, uscite: 0 };
-
-      // Movimenti conto del mese
       const movs = await db.movimenti_conto
         .where('data').between(dataInizio, dataFine, true, true).toArray();
 
-      const entrate = movs.filter(m => m.tipo === 'entrata').reduce((s,m) => s+m.importo, 0);
-      //const uscite  = movs.filter(m => m.tipo === 'uscita').reduce((s,m) => s+m.importo, 0);
-      const uscite  = movs.filter(m => m.tipo === 'uscita' && !idVersPrima.has(m.voce_budget_id)).reduce((s,m) => s+m.importo, 0);
-
-      return { mese: meseNum, entrate, uscite };
+      return {
+        mese: meseNum,
+        entrate:       somma(movs.filter(m => m.tipo === 'entrata' && !isStraord(m))),
+        uscite:        somma(movs.filter(m => m.tipo === 'uscita'  && !isNonSpesa(m))),
+        straordinarie: somma(movs.filter(m => m.tipo === 'entrata' &&  isStraord(m))),
+        risparmio:     somma(movs.filter(m => m.tipo === 'uscita'  &&  isNonSpesa(m)))
+      };
     })
   );
 
-  // Categorie top uscite (media mensile)
-  const cats = await db.categorie_budget.where('tipo').equals('uscita').toArray();
-  const voci = await db.voci_budget.where('attiva').equals(1).toArray();
-  const regs = await db.registrazioni.toArray();
-  const movsVoce = await db.movimenti_voce.toArray();
+  // ── Top categorie di spesa (solo anno corrente, senza risparmio/investimenti) ──
+  // Reale di una voce in un mese: movimenti voce se esistono, altrimenti importo diretto
+  const idMesiAnno = new Set(mesi.map(m => m.id));
+  const movPerVoceMese = {};
+  movsVoce.filter(m => idMesiAnno.has(m.mese_id)).forEach(m => {
+    const k = `${m.voce_id}_${m.mese_id}`;
+    movPerVoceMese[k] = (movPerVoceMese[k] || 0) + m.importo;
+  });
+  const realeVoce = {};
+  Object.entries(movPerVoceMese).forEach(([k, v]) => {
+    const voceId = k.split('_')[0];
+    realeVoce[voceId] = (realeVoce[voceId] || 0) + v;
+  });
+  regs.filter(r => idMesiAnno.has(r.mese_id)).forEach(r => {
+    if (movPerVoceMese[`${r.voce_id}_${r.mese_id}`] === undefined)
+      realeVoce[r.voce_id] = (realeVoce[r.voce_id] || 0) + (r.importo_reale || 0);
+  });
 
-  const catTotali = await Promise.all(cats.map(async cat => {
-    const vociCat = voci.filter(v => v.categoria_id === cat.id);
-    let tot = 0;
-    vociCat.forEach(v => {
-      const movTot = movsVoce.filter(m => m.voce_id === v.id).reduce((s,m) => s+m.importo, 0);
-      const regTot = regs.filter(r => r.voce_id === v.id).reduce((s,r) => s+(r.importo_reale||0), 0);
-      tot += movTot > 0 ? movTot : regTot;
-    });
-    return { nome: cat.nome, colore: cat.colore, totale: tot };
-  }));
-
+  const vociAttive = voci.filter(v => v.attiva);
+  const catTotali = cats
+    .filter(c => c.tipo === 'uscita' && !idCatNonSpesa.has(c.id))
+    .map(cat => ({
+      nome: cat.nome, colore: cat.colore,
+      totale: vociAttive.filter(v => v.categoria_id === cat.id)
+                        .reduce((s, v) => s + (realeVoce[v.id] || 0), 0)
+    }));
+  const totSpeseCat = catTotali.reduce((s, c) => s + c.totale, 0);
   const topCat = catTotali.filter(c => c.totale > 0)
-    .sort((a,b) => b.totale - a.totale).slice(0, 5);
+    .sort((a, b) => b.totale - a.totale).slice(0, 5);
 
-  const totEntrate = datiMesi.reduce((s,m) => s+m.entrate, 0);
-  const totUscite  = datiMesi.reduce((s,m) => s+m.uscite, 0);
+  // ── Totali e medie ──
+  const totEntrate = datiMesi.reduce((s, m) => s + m.entrate, 0);
+  const totUscite  = datiMesi.reduce((s, m) => s + m.uscite, 0);
+  const totStraord = datiMesi.reduce((s, m) => s + m.straordinarie, 0);
+  const totRisp    = datiMesi.reduce((s, m) => s + m.risparmio, 0);
   const mesiConDati = datiMesi.filter(m => m.entrate > 0 || m.uscite > 0).length || 1;
   const mediaEntrate = totEntrate / mesiConDati;
   const mediaUscite  = totUscite  / mesiConDati;
   const mediaSaldo   = mediaEntrate - mediaUscite;
 
+  const esclusi = [];
+  if (totStraord > 0) esclusi.push(`entrate straordinarie ${formatEur(totStraord)}`);
+  if (totRisp > 0)    esclusi.push(`risparmio e investimenti versati ${formatEur(totRisp)}`);
+
   root.innerHTML = `
     <!-- Sommario anno -->
     <p class="section-title">${anno} — Riepilogo annuale</p>
-    <div class="kpi-grid" style="margin-bottom:16px">
+    <div class="kpi-grid" style="margin-bottom:${esclusi.length ? 8 : 16}px">
       <div class="kpi-card">
         <div class="label">Entrate totali</div>
         <div class="value text-positive">${formatEur(totEntrate)}</div>
@@ -91,6 +140,10 @@ export async function init() {
         </div>
       </div>
     </div>
+    ${esclusi.length ? `
+    <div style="font-size:0.75rem;color:var(--text-muted);margin-bottom:16px;line-height:1.4">
+      Non contati nei totali: ${esclusi.join(' · ')}
+    </div>` : ''}
 
     <!-- Grafico trend annuale -->
     <p class="section-title">Trend mensile ${anno}</p>
@@ -106,7 +159,7 @@ export async function init() {
       ${topCat.length === 0
         ? '<div class="empty-state" style="padding:24px"><p>Nessun dato disponibile</p></div>'
         : topCat.map((cat, i) => {
-            const pct = totUscite > 0 ? (cat.totale/totUscite*100).toFixed(1) : 0;
+            const pct = totSpeseCat > 0 ? (cat.totale/totSpeseCat*100).toFixed(1) : 0;
             return `
             <div style="padding:12px 14px;${i>0?'border-top:1px solid var(--border)':''}">
               <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px">
@@ -116,7 +169,7 @@ export async function init() {
                 </div>
                 <div style="text-align:right">
                   <div style="font-size:0.95rem;font-weight:700">${formatEur(cat.totale)}</div>
-                  <div style="font-size:0.7rem;color:var(--text-muted)">${pct}% delle uscite</div>
+                  <div style="font-size:0.7rem;color:var(--text-muted)">${pct}% delle spese</div>
                 </div>
               </div>
               <div style="height:4px;background:var(--border);border-radius:2px;overflow:hidden">
