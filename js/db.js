@@ -293,7 +293,7 @@ db.on('ready', () => {
    'cedole_budget','conti_correnti','movimenti_conto','conti_deposito','vincoli_deposito',
    'cedole_deposito','pac_etf','pac_versamenti','categorie_budget','voci_budget',
    'registrazioni','portafogli','strumenti_portafoglio','movimenti_portafoglio',
-   'beni_reali','movimenti_voce']
+   'beni_reali','movimenti_voce','previsioni_mensili','riconciliazioni','piano_mensile']
   .forEach(t => { if (db[t]) patchTableForSync(db[t]); });
 });
 
@@ -462,12 +462,12 @@ export async function exportAllData() {
 }
 
 export async function importAllData(data) {
-  // Categorie e voci: se il backup è vecchio e non le contiene,
-  // si mantengono quelle esistenti (o i default)
-  const haCategorie = !!data.categorie_budget?.length;
-  const tabelle = TABELLE_BACKUP.filter(t =>
-    haCategorie || (t !== 'categorie_budget' && t !== 'voci_budget'));
-
+  // Tabelle sempre ripristinate
+  const tabelle = [
+    'mesi','voci_uscita','voci_entrata','accantonamenti','crediti_sospeso',
+    'cedole_budget','conti_correnti','movimenti_conto','conti_deposito',
+    'cedole_deposito','pac_etf','pac_versamenti','registrazioni'
+  ];
   await db.transaction('rw', tabelle.map(t => db[t]), async () => {
     for (const t of tabelle) {
       await db[t].clear();
@@ -475,7 +475,15 @@ export async function importAllData(data) {
     }
   });
 
-  if (!haCategorie) {
+  // Categorie e voci: ripristina solo se il backup le contiene,
+  // altrimenti mantieni quelle esistenti o reinserisci i default
+  if (data.categorie_budget?.length) {
+    await db.categorie_budget.clear();
+    await db.categorie_budget.bulkAdd(data.categorie_budget);
+    await db.voci_budget.clear();
+    if (data.voci_budget?.length) await db.voci_budget.bulkAdd(data.voci_budget);
+  } else {
+    // Backup vecchio (v1) — mantieni o crea default
     const n = await db.categorie_budget.count();
     if (n === 0) await _insertDefaults(null);
   }
