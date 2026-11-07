@@ -493,6 +493,8 @@ function disegnaListaMov() {
         <div class="list-item-right">
           <div style="font-size:0.95rem;font-weight:700;color:${col}">${segno} ${formatEur(m.importo)}</div>
           <div style="display:flex;gap:4px;margin-top:2px;justify-content:flex-end">
+            <button onclick="window.modificaMovimento(${m.id})"
+              style="font-size:0.7rem;color:var(--text-muted);cursor:pointer;background:none;border:none">✏️</button>
             ${!catOk ? `<button onclick="window.categorizzaMovimento(${m.id})"
               style="font-size:0.7rem;color:var(--orange);cursor:pointer;background:none;border:none">📌</button>` : ''}
             <button onclick="window.eliminaMovimento(${m.id})"
@@ -524,6 +526,10 @@ async function renderMovimenti() {
   movMese     = movimenti;
   contiMovMap = Object.fromEntries(conti.map(c => [c.id, c]));
 
+  // Movimenti con data non valida (es. anno 0007): non compaiono in nessun mese
+  const anomali = await db.movimenti_conto
+    .filter(m => !/^20\d\d-\d\d-\d\d$/.test(m.data || '')).toArray();
+
   const nonCat = movimenti.filter(m => !m.categorizzato && m.tipo !== 'trasferimento');
   const totEnt = movimenti.filter(m => m.tipo === 'entrata').reduce((s,m) => s+m.importo, 0);
   const totUsc = movimenti.filter(m => m.tipo === 'uscita').reduce((s,m) => s+m.importo, 0);
@@ -533,6 +539,24 @@ async function renderMovimenti() {
               'background:var(--bg-card);color:var(--text)';
 
   root.innerHTML = `
+        ${anomali.length ? `
+    <div style="background:var(--orange-light);border:1px solid var(--orange);
+                border-radius:var(--radius-sm);padding:10px 12px;margin-bottom:12px">
+      <div style="font-size:0.8rem;font-weight:700;color:var(--orange);margin-bottom:6px">
+        ⚠️ ${anomali.length} movimenti con data non valida: non compaiono in nessun mese</div>
+      ${anomali.map(m => `
+      <div style="display:flex;justify-content:space-between;align-items:center;
+                  font-size:0.8rem;padding:4px 0">
+        <span style="min-width:0;overflow:hidden;text-overflow:ellipsis">
+          ${escH(m.data || 'senza data')} · ${escH(m.descrizione || m.categoria || '—')} · ${formatEur(m.importo)}</span>
+        <span style="display:flex;gap:4px;flex-shrink:0">
+          <button onclick="window.modificaMovimento(${m.id})"
+            style="font-size:0.8rem;cursor:pointer;background:none;border:none">✏️</button>
+          <button onclick="window.eliminaMovimento(${m.id})"
+            style="font-size:0.8rem;cursor:pointer;background:none;border:none">🗑️</button>
+        </span>
+      </div>`).join('')}
+    </div>` : ''}
     <div class="kpi-grid" style="margin-bottom:12px">
       <div class="kpi-card"><div class="label">Entrate</div>
         <div class="value text-positive">${formatEur(totEnt)}</div></div>
@@ -986,6 +1010,105 @@ async function categorizzaMovimento(movId) {
   lucide.createIcons();
 }
 
+// ── MODAL MODIFICA MOVIMENTO ──────────────────────────────────────────────────
+async function modificaMovimento(movId) {
+  const mov = await db.movimenti_conto.get(movId);
+  if (!mov) return;
+  const isTra = mov.tipo === 'trasferimento';
+  const [conti, cats, voci, legato] = await Promise.all([
+    db.conti_correnti.toArray(),
+    db.categorie_budget.orderBy('ordine').toArray(),
+    db.voci_budget.toArray(),
+    mov.voce_budget_id ? db.movimenti_voce.get(mov.voce_budget_id) : null
+  ]);
+  const voceAttuale = legato?.voce_id || null;
+  const contiOk = conti.filter(c =>
+    c.attivo === 1 || c.id === mov.conto_id || c.id === mov.conto_dest_id);
+
+  const tipoCat = mov.tipo === 'entrata' ? 'entrata' : 'uscita';
+  const gruppi = cats.filter(c => c.tipo === tipoCat && c.attiva).map(c => {
+    const vs = voci.filter(v => v.categoria_id === c.id && (v.attiva || v.id === voceAttuale))
+      .sort((a, b) => (a.ordine || 0) - (b.ordine || 0));
+    return vs.length
+      ? `<optgroup label="${escH(c.nome)}">${vs.map(v =>
+          `<option value="${v.id}" ${v.id === voceAttuale ? 'selected' : ''}>${escH(v.nome)}</option>`
+        ).join('')}</optgroup>`
+      : '';
+  }).join('');
+
+  const optConti = idSel => contiOk.map(c =>
+    `<option value="${c.id}" ${c.id === idSel ? 'selected' : ''}>${escH(c.nome)}</option>`).join('');
+
+  const TIPO_LABEL = { uscita: 'Uscita', entrata: 'Entrata', trasferimento: 'Trasferimento' };
+  const nota = legato
+    ? 'Collegato al Budget: le modifiche aggiornano anche la voce.'
+    : (mov.categoria
+        ? 'Non collegato al Budget (movimento vecchio): le modifiche non toccano il Budget. '
+          + 'Se scegli una voce, controlla di non contare la stessa spesa due volte.'
+        : '');
+
+  document.getElementById('modal-mod-mov')?.remove();
+  const modal = document.createElement('div');
+  modal.id = 'modal-mod-mov'; modal.className = 'modal-overlay hidden';
+  modal.innerHTML = `
+    <div class="modal">
+      <div class="modal-header">
+        <h2 class="modal-title">Modifica movimento</h2>
+        <button class="modal-close" onclick="this.closest('.modal-overlay').remove()">
+          <i data-lucide="x"></i>
+        </button>
+      </div>
+      <div style="font-size:0.78rem;color:var(--text-muted);margin-bottom:10px">
+        Tipo: <strong>${TIPO_LABEL[mov.tipo] || mov.tipo}</strong> (per cambiarlo, elimina e ricrea)
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <div class="label">Importo (€) *</div>
+          <input type="number" id="mm-importo" value="${mov.importo}" step="0.01" inputmode="decimal"
+                 style="font-size:1.3rem;font-weight:700">
+        </div>
+        <div class="form-group">
+          <div class="label">Data *</div>
+          <input type="date" id="mm-data" value="${escH(mov.data || '')}">
+        </div>
+      </div>
+      <div class="form-group">
+        <div class="label">Descrizione</div>
+        <input type="text" id="mm-desc" value="${escH(mov.descrizione || '')}">
+      </div>
+      ${isTra ? '' : `
+      <div class="form-group">
+        <div class="label">Voce di budget</div>
+        <select id="mm-voce">
+          <option value="">— nessuna (da categorizzare) —</option>${gruppi}
+        </select>
+        ${nota ? `<div style="font-size:0.72rem;color:var(--text-muted);margin-top:4px">${nota}</div>` : ''}
+      </div>`}
+      <div class="form-group">
+        <div class="label">Conto *</div>
+        <select id="mm-conto">${optConti(mov.conto_id)}</select>
+      </div>
+      ${isTra ? `
+      <div class="form-group">
+        <div class="label">Conto destinazione</div>
+        <select id="mm-conto-dest">${optConti(mov.conto_dest_id)}</select>
+      </div>` : ''}
+      <div class="form-actions">
+        <button class="btn btn-ghost" onclick="this.closest('.modal-overlay').remove()">Annulla</button>
+        <button class="btn btn-primary" onclick="window.salvaModMov(${movId})">Salva</button>
+      </div>
+    </div>`;
+  document.body.appendChild(modal);
+  ['mm-importo', 'mm-desc'].forEach(id =>
+    document.getElementById(id).addEventListener('keydown', e => {
+      if (e.key === 'Enter') window.salvaModMov(movId);
+    }));
+  modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
+  modal.classList.remove('hidden');
+  requestAnimationFrame(() => modal.classList.add('open'));
+  lucide.createIcons();
+}
+
 // ── MODAL VOCE BUDGET ─────────────────────────────────────────────────────────
 async function apriVoce(voceId, voceName, prevDefault) {
   const [movs, reg, prevMese] = await Promise.all([
@@ -1068,6 +1191,7 @@ async function apriVoce(voceId, voceName, prevDefault) {
 function setupGlobals() {
   window.apriNuovoMovimento  = apriNuovoMovimento;
   window.categorizzaMovimento = categorizzaMovimento;
+  window.modificaMovimento   = modificaMovimento;
   window.apriVoce            = apriVoce;
 
   window.azzeraFiltriMov = async () => {
@@ -1138,6 +1262,76 @@ function setupGlobals() {
     if (mov?.voce_budget_id) await db.movimenti_voce.delete(mov.voce_budget_id);
     await db.movimenti_conto.delete(id);
     toast('Eliminato');
+    await renderMovimenti();
+  };
+
+    window.salvaModMov = async (movId) => {
+    const mov = await db.movimenti_conto.get(movId);
+    if (!mov) return;
+    const isTra   = mov.tipo === 'trasferimento';
+    const importo = parseFloat(document.getElementById('mm-importo').value);
+    const data    = document.getElementById('mm-data').value;
+    const contoId = parseInt(document.getElementById('mm-conto').value);
+    const desc    = document.getElementById('mm-desc').value.trim();
+    const voceId  = isTra ? null : (parseInt(document.getElementById('mm-voce').value) || null);
+    const destId  = isTra ? parseInt(document.getElementById('mm-conto-dest').value) : null;
+
+    if (!importo || importo <= 0 || !data || !contoId) {
+      alert('Inserisci data, importo e conto'); return;
+    }
+    if (!/^20\d\d-\d\d-\d\d$/.test(data)) {
+      alert('Controlla la data: anno non valido'); return;
+    }
+    if (isTra && destId === contoId) {
+      alert('Scegli due conti diversi'); return;
+    }
+
+    const valore = Math.abs(importo);
+    const [voce, legato] = await Promise.all([
+      voceId ? db.voci_budget.get(voceId) : null,
+      mov.voce_budget_id ? db.movimenti_voce.get(mov.voce_budget_id) : null
+    ]);
+
+    const modifiche = {
+      conto_id: contoId, data, importo: valore,
+      descrizione: desc, conto_dest_id: destId
+    };
+
+    if (voce) {
+      // Voce scelta: aggiorna il movimento di budget (o lo crea se mancava)
+      const meseRec = await getOrCreateMese(
+        parseInt(data.slice(0, 4)), parseInt(data.slice(5, 7)));
+      const datiVoce = {
+        voce_id: voce.id, mese_id: meseRec.id, data,
+        importo: valore, descrizione: desc || voce.nome
+      };
+      if (legato) {
+        await db.movimenti_voce.update(legato.id, datiVoce);
+        modifiche.voce_budget_id = legato.id;
+      } else {
+        modifiche.voce_budget_id = await db.movimenti_voce.add({
+          ...datiVoce,
+          modalita: mov.tipo === 'entrata' ? 'bonifico' : 'pos',
+          note: 'Da movimento bancario'
+        });
+      }
+      modifiche.categoria = voce.nome;
+      modifiche.categorizzato = 1;
+    } else if (legato) {
+      // Voce tolta: rimuove il collegamento al Budget
+      await db.movimenti_voce.delete(legato.id);
+      modifiche.voce_budget_id = null;
+      modifiche.categoria = null;
+      modifiche.categorizzato = 0;
+    }
+
+    await db.movimenti_conto.update(movId, modifiche);
+    document.getElementById('modal-mod-mov')?.remove();
+
+    const meseNuovo = parseInt(data.slice(5, 7));
+    const spostato = data.slice(0, 4) !== String(currentAnno) || meseNuovo !== currentMeseNum;
+    toast(spostato ? `Salvato: ora è in ${MESI_NOMI[meseNuovo]} ${data.slice(0, 4)}`
+                   : 'Movimento modificato', 'success');
     await renderMovimenti();
   };
 
