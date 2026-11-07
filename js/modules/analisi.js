@@ -12,11 +12,31 @@ const CAT_ENTRATE_STRAORD = ['Entrate Straordinarie'];
 
 const somma = righe => righe.reduce((s, m) => s + m.importo, 0);
 
+// Anno mostrato e grafico attivo (da distruggere a ogni cambio anno)
+let annoSel = new Date().getFullYear();
+let chartTrend = null;
+
+// Primo e ultimo anno con dati (l'ultimo è almeno l'anno corrente)
+async function intervalloAnni() {
+  const date = await db.movimenti_conto.orderBy('data').keys();
+  const anni = new Set(date.filter(d => /^20\d\d-/.test(d)).map(d => parseInt(d.slice(0, 4))));
+  (await db.mesi.toArray()).forEach(m => { if (m.anno >= 2000) anni.add(m.anno); });
+  anni.add(new Date().getFullYear());
+  return [Math.min(...anni), Math.max(...anni)];
+}
+
 export async function init() {
+  annoSel = new Date().getFullYear();
+  await render();
+}
+
+async function render() {
   const root = document.getElementById('analisi-root');
   root.innerHTML = `<div class="spinner" style="margin:32px auto"></div>`;
+  if (chartTrend) { chartTrend.destroy(); chartTrend = null; }
 
-  const anno = new Date().getFullYear();
+  const anno = annoSel;
+  const [annoMin, annoMax] = await intervalloAnni();
 
   const [mesi, cats, voci, regs, movsVoce] = await Promise.all([
     db.mesi.where('anno').equals(anno).toArray(),
@@ -71,7 +91,7 @@ export async function init() {
     })
   );
 
-  // ── Top categorie di spesa (solo anno corrente, senza risparmio/investimenti) ──
+  // ── Top categorie di spesa (solo anno selezionato, senza risparmio/investimenti) ──
   // Reale di una voce in un mese: movimenti voce se esistono, altrimenti importo diretto
   const idMesiAnno = new Set(mesi.map(m => m.id));
   const movPerVoceMese = {};
@@ -115,9 +135,28 @@ export async function init() {
   if (totStraord > 0) esclusi.push(`entrate straordinarie ${formatEur(totStraord)}`);
   if (totRisp > 0)    esclusi.push(`risparmio e investimenti versati ${formatEur(totRisp)}`);
 
+  const haDati = datiMesi.some(m => m.entrate > 0 || m.uscite > 0 || m.straordinarie > 0 || m.risparmio > 0);
+
+  // Selettore anno
+  const BTN = 'width:36px;height:36px;border-radius:50%;border:1px solid var(--border);' +
+              'background:var(--bg-card);color:var(--text);font-size:1.1rem;cursor:pointer';
+  const spento = 'opacity:0.3;cursor:default';
+
   root.innerHTML = `
+    <!-- Selettore anno -->
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+      <button id="an-prec" aria-label="Anno precedente"
+              style="${BTN};${anno <= annoMin ? spento : ''}" ${anno <= annoMin ? 'disabled' : ''}>‹</button>
+      <div style="font-size:1.1rem;font-weight:700">${anno}</div>
+      <button id="an-succ" aria-label="Anno successivo"
+              style="${BTN};${anno >= annoMax ? spento : ''}" ${anno >= annoMax ? 'disabled' : ''}>›</button>
+    </div>
+
+    ${haDati ? '' : `
+    <div class="empty-state" style="padding:24px"><p>Nessun movimento nel ${anno}.</p></div>`}
+
     <!-- Sommario anno -->
-    <p class="section-title">${anno} — Riepilogo annuale</p>
+    <p class="section-title">Riepilogo annuale</p>
     <div class="kpi-grid" style="margin-bottom:${esclusi.length ? 8 : 16}px">
       <div class="kpi-card">
         <div class="label">Entrate totali</div>
@@ -212,10 +251,18 @@ export async function init() {
     </div>
   `;
 
+  // Frecce anno
+  document.getElementById('an-prec')?.addEventListener('click', async () => {
+    if (annoSel > annoMin) { annoSel--; await render(); }
+  });
+  document.getElementById('an-succ')?.addEventListener('click', async () => {
+    if (annoSel < annoMax) { annoSel++; await render(); }
+  });
+
   // Grafico trend
   const ctx = document.getElementById('chart-trend')?.getContext('2d');
   if (ctx) {
-    new Chart(ctx, {
+    chartTrend = new Chart(ctx, {
       type: 'bar',
       data: {
         labels: MESI_NOMI.slice(1),
