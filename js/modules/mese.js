@@ -1,6 +1,7 @@
 /* BudgetMe — mese.js
    Ciclo mensile completo: movimenti, budget, riconciliazione */
-import db, { getOrCreateMese, getPrevisioneVoce } from '../db.js';
+// import db, { getOrCreateMese, getPrevisioneVoce } from '../db.js';
+import db, { getOrCreateMese, getPrevisioneVoce, saldiContiAl } from '../db.js';
 import { formatEur, formatDate, today, toast, MESI_NOMI } from '../utils.js';
 
 const MODALITA_LABEL = {
@@ -155,10 +156,8 @@ async function renderStatoBadge() {
 async function calcolaSaldoApertura() {
   let annoPrec = currentAnno, mesePrec = currentMeseNum - 1;
   if (mesePrec < 1) { mesePrec = 12; annoPrec--; }
-  const mp = await db.mesi.where({ anno: annoPrec, mese: mesePrec }).first();
-  if (mp?.saldo_chiusura !== undefined) return mp.saldo_chiusura;
-  const conti = await db.conti_correnti.toArray();
-  return conti.filter(c => c.attivo === 1).reduce((s,c) => s + (c.saldo_iniziale||0), 0);
+  const { saldi } = await saldiContiAl(fineMese(annoPrec, mesePrec));
+  return Object.values(saldi).reduce((s, v) => s + v, 0);
 }
 
 // ── TAB PIANO BUSTE ───────────────────────────────────────────────────────────
@@ -736,19 +735,29 @@ async function renderBudget() {
 }
 
 // ── TAB RICONCILIAZIONE ───────────────────────────────────────────────────────
+// Saldi calcolati per conto a fine mese, letti da chiudiMese
+let riconc = { conti: [], calcolati: {} };
+
 async function renderRiconciliazione() {
   const root = document.getElementById('mese-root');
-  const conti = await db.conti_correnti.where('attivo').equals(1).toArray();
-  const saldoApertura = currentMese.saldo_apertura ?? await calcolaSaldoApertura();
   const dataInizio = `${currentAnno}-${String(currentMeseNum).padStart(2,'0')}-01`;
   const dataFine   = fineMese(currentAnno, currentMeseNum);
-  const movimenti  = await db.movimenti_conto
-    .where('data').between(dataInizio, dataFine, true, true).toArray();
+  const [saldoApertura, fine, movimenti, tuttiConti, ricons] = await Promise.all([
+    calcolaSaldoApertura(),
+    saldiContiAl(dataFine),
+    db.movimenti_conto.where('data').between(dataInizio, dataFine, true, true).toArray(),
+    db.conti_correnti.toArray(),
+    db.riconciliazioni.where('mese_id').equals(currentMese.id).toArray()
+  ]);
+  const conti    = fine.conti;
+  riconc         = { conti, calcolati: fine.saldi };
+  const contiMap = Object.fromEntries(tuttiConti.map(c => [c.id, c]));
+
   const totEnt = movimenti.filter(m => m.tipo==='entrata').reduce((s,m)=>s+m.importo,0);
   const totUsc = movimenti.filter(m => m.tipo==='uscita').reduce((s,m)=>s+m.importo,0);
-  const saldoCalcolato = saldoApertura + totEnt - totUsc;
-  const isMeseChiuso  = currentMese.stato === 'chiuso';
-  const recon = await db.riconciliazioni.where('mese_id').equals(currentMese.id).first();
+  const saldoCalcolato = Object.values(fine.saldi).reduce((s,v)=>s+v,0);
+  const altre = saldoCalcolato - (saldoApertura + totEnt - totUsc);
+  const isMeseChiuso = currentMese.stato === 'chiuso';
 
   root.innerHTML = `
     <div class="card" style="margin-bottom:12px">
@@ -766,6 +775,11 @@ async function renderRiconciliazione() {
           <span style="color:var(--red)">− Uscite</span>
           <span style="font-weight:600;color:var(--red)">${formatEur(totUsc)}</span>
         </div>
+        ${Math.abs(altre) >= 0.005 ? `
+        <div style="display:flex;justify-content:space-between">
+          <span style="color:var(--text-muted)">± Altre variazioni</span>
+          <span style="font-weight:600">${formatEur(altre, true)}</span>
+        </div>` : ''}
         <div style="border-top:2px solid var(--border);padding-top:8px;
              display:flex;justify-content:space-between">
           <span style="font-weight:700">Saldo calcolato</span>
@@ -776,58 +790,59 @@ async function renderRiconciliazione() {
     ${isMeseChiuso ? `
     <div style="background:var(--gray-light);border-radius:var(--radius-sm);padding:12px 14px;margin-bottom:12px">
       <div style="font-size:0.82rem;font-weight:700;color:var(--gray);margin-bottom:8px">
-        🔒 Mese chiuso il ${recon?.data_chiusura?formatDate(recon.data_chiusura):'—'}
+        🔒 Mese chiuso il ${ricons[0]?.data_chiusura ? formatDate(ricons[0].data_chiusura) : '—'}
       </div>
-      <div style="display:flex;justify-content:space-between;font-size:0.85rem;margin-bottom:4px">
-        <span>Saldo reale banca</span><span>${formatEur(recon?.saldo_estratto_conto)}</span>
-      </div>
-      <div style="display:flex;justify-content:space-between;font-size:0.85rem;font-weight:700;
-           color:${Math.abs(recon?.differenza||0)<0.01?'var(--green)':'var(--red)'}">
-        <span>Differenza</span><span>${formatEur(recon?.differenza??0)}</span>
-      </div>
+      ${ricons.map(r => `
+      <div style="padding:6px 0;border-top:1px solid var(--border)">
+        <div style="font-size:0.82rem;font-weight:600">${escH(contiMap[r.conto_id]?.nome || 'Conto')}</div>
+        <div style="display:flex;justify-content:space-between;font-size:0.85rem">
+          <span>Saldo reale banca</span><span>${formatEur(r.saldo_estratto_conto)}</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;font-size:0.85rem;font-weight:700;
+             color:${(r.differenza || 0) >= -0.005 ? 'var(--green)' : 'var(--red)'}">
+          <span>Differenza</span><span>${formatEur(r.differenza ?? 0, true)}</span>
+        </div>
+      </div>`).join('')}
     </div>
     <button class="btn btn-ghost btn-full" onclick="window.riapreMese()">🔓 Riapri mese</button>
+    ` : (conti.length === 0 ? `
+    <div class="empty-state"><p>Nessun conto attivo.<br>Aggiungine uno in Patrimonio → Conti.</p></div>
     ` : `
     <div class="card" style="margin-bottom:12px">
       <div class="card-title">VERIFICA SALDO REALE</div>
       <p style="font-size:0.82rem;color:var(--text-muted);margin-bottom:12px">
-        Inserisci il saldo che vedi nell'app della banca a fine ${MESI_NOMI[currentMeseNum]}.
+        Inserisci, per ogni conto, il saldo che vedi nell'app della banca a fine ${MESI_NOMI[currentMeseNum]}.
       </p>
-      ${conti.map(c=>`
+      ${conti.map(c => `
       <div class="form-group">
-        <div class="label">${c.nome} — saldo reale (€)</div>
-        <input type="number" id="sr-${c.id}" placeholder="0.00" step="0.01"
-          inputmode="decimal" value="${recon?.saldo_estratto_conto||''}">
+        <div class="label">${escH(c.nome)} — saldo reale (€)</div>
+        <input type="number" id="sr-${c.id}" placeholder="0.00" step="0.01" inputmode="decimal">
+        <div style="display:flex;justify-content:space-between;font-size:0.75rem;
+                    color:var(--text-muted);margin-top:4px">
+          <span>Calcolato: ${formatEur(fine.saldi[c.id])}</span>
+          <span id="diff-${c.id}" style="font-weight:700"></span>
+        </div>
       </div>`).join('')}
-      <div id="diff-preview" style="display:none;background:var(--bg);
-           border-radius:var(--radius-sm);padding:10px 12px;margin-top:8px">
-        <div style="display:flex;justify-content:space-between;font-size:0.85rem;margin-bottom:4px">
-          <span>Saldo inserito</span><span id="diff-ins">—</span>
-        </div>
-        <div style="display:flex;justify-content:space-between;font-weight:700;
-             padding-top:6px;border-top:1px solid var(--border)">
-          <span>Differenza</span><span id="diff-val">—</span>
-        </div>
-      </div>
     </div>
-    <button class="btn btn-primary btn-full"
-      onclick="window.chiudiMese(${saldoCalcolato}, ${conti[0]?.id||0})">
+    <button class="btn btn-primary btn-full" onclick="window.chiudiMese()">
       🔒 Chiudi ${MESI_NOMI[currentMeseNum]} ${currentAnno}
     </button>
     <p style="font-size:0.75rem;color:var(--text-muted);text-align:center;margin-top:8px">
-      La chiusura blocca il mese e imposta il saldo di apertura del mese successivo.
-    </p>`}`;
+      La chiusura blocca il mese e salva, per ogni conto, il confronto con la banca.
+      L'apertura del mese successivo si calcola dai movimenti.
+    </p>`)}`;
 
-  // Preview diff in realtime
-  if (!isMeseChiuso && conti.length > 0) {
-    document.getElementById(`sr-${conti[0].id}`)?.addEventListener('input', e => {
-      const ins  = parseFloat(e.target.value) || 0;
-      const diff = ins - saldoCalcolato;
-      document.getElementById('diff-preview').style.display = '';
-      document.getElementById('diff-ins').textContent = formatEur(ins);
-      const dEl = document.getElementById('diff-val');
-      dEl.textContent  = (diff>=0?'+':'') + formatEur(diff);
-      dEl.style.color  = Math.abs(diff)<0.01?'var(--green)':'var(--red)';
+  // Differenza in tempo reale, conto per conto
+  if (!isMeseChiuso) {
+    conti.forEach(c => {
+      document.getElementById(`sr-${c.id}`)?.addEventListener('input', e => {
+        const el = document.getElementById(`diff-${c.id}`);
+        if (!el) return;
+        if (e.target.value === '') { el.textContent = ''; return; }
+        const diff = parseFloat(e.target.value) - (riconc.calcolati[c.id] ?? 0);
+        el.textContent = formatEur(diff, true);
+        el.style.color = diff >= -0.005 ? 'var(--green)' : 'var(--red)';
+      });
     });
   }
   lucide.createIcons();
@@ -1408,19 +1423,31 @@ function setupGlobals() {
     await apriVoce(voceId,voceName,prevDefault);
   };
 
-  window.chiudiMese = async (saldoCalcolato, primoContoId) => {
-    const saldoReale = parseFloat(document.getElementById(`sr-${primoContoId}`)?.value);
-    if (isNaN(saldoReale)){alert('Inserisci il saldo reale della banca');return;}
+    window.chiudiMese = async () => {
+    // Un saldo reale per ogni conto attivo
+    const righe = [];
+    for (const c of riconc.conti) {
+      const v = parseFloat(document.getElementById(`sr-${c.id}`)?.value);
+      if (isNaN(v)) { alert(`Inserisci il saldo reale di "${c.nome}"`); return; }
+      righe.push({ conto: c, reale: v });
+    }
+    if (righe.length === 0) { alert('Nessun conto attivo'); return; }
     if (!confirm(`Chiudere ${MESI_NOMI[currentMeseNum]} ${currentAnno}?`)) return;
-    const diff = saldoReale - saldoCalcolato;
-    await db.riconciliazioni.add({
-      mese_id:currentMese.id, conto_id:primoContoId,
-      saldo_estratto_conto:saldoReale, saldo_calcolato:saldoCalcolato,
-      differenza:diff, data_chiusura:today(), note:''
-    });
-    await db.mesi.update(currentMese.id,{stato:'chiuso',saldo_chiusura:saldoCalcolato});
+
+    let totCalcolato = 0;
+    for (const { conto, reale } of righe) {
+      const calcolato = riconc.calcolati[conto.id] ?? 0;
+      totCalcolato += calcolato;
+      await db.riconciliazioni.add({
+        mese_id: currentMese.id, conto_id: conto.id,
+        saldo_estratto_conto: reale, saldo_calcolato: calcolato,
+        differenza: Math.round((reale - calcolato) * 100) / 100,
+        data_chiusura: today(), note: ''
+      });
+    }
+    await db.mesi.update(currentMese.id, { stato: 'chiuso', saldo_chiusura: totCalcolato });
     currentMese = await db.mesi.get(currentMese.id);
-    toast(`${MESI_NOMI[currentMeseNum]} chiuso ✓`,'success');
+    toast(`${MESI_NOMI[currentMeseNum]} chiuso ✓`, 'success');
     await renderStatoBadge();
     await renderRiconciliazione();
   };

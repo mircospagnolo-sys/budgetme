@@ -32,6 +32,7 @@ export function initFirebase(firebaseApp, firestoreDb, firebaseAuth) {
       _user = user;
       syncState.isLoggedIn = true;
       syncState.userId = user.uid;
+      await ripristinaSblocco();
       document.dispatchEvent(new CustomEvent('auth:loggedin', { detail: user }));
     } else {
       _user = null;
@@ -43,6 +44,27 @@ export function initFirebase(firebaseApp, firestoreDb, firebaseAuth) {
     }
     updateSyncUI();
   });
+}
+
+// Dopo un ricaricamento, riprende la password salvata in sessionStorage
+// (solo se è ancora quella giusta). Non scarica dati dal cloud.
+async function ripristinaSblocco() {
+  const salvata = sessionStorage.getItem('_bm_enc');
+  if (!salvata || !_user) return;
+  try {
+    const meta = await _db.collection('users').doc(_user.uid)
+      .collection('meta').doc('encryption').get();
+    if (!meta.exists) return;
+    const { salt, verifyToken } = meta.data();
+    if (!(await verifyPassword(salvata, salt, verifyToken))) {
+      sessionStorage.removeItem('_bm_enc');
+      return;
+    }
+    _encPwd = salvata;
+    syncState.isEncReady = true;
+  } catch (e) {
+    console.warn('[BudgetMe] ripristino sblocco non riuscito:', e);
+  }
 }
 
 // ── AUTENTICAZIONE ──────────────────────────────────────────────────────────
@@ -58,6 +80,7 @@ export async function loginWithGoogle() {
 
 export async function logout() {
   _encPwd = null;
+  sessionStorage.removeItem('_bm_enc');
   syncState.isEncReady = false;
   await _auth.signOut();
   toast('Disconnesso');

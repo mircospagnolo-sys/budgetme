@@ -274,10 +274,15 @@ if (checkBackupReminder()) {
 // Ascolta eventi auth
 document.addEventListener('auth:loggedin', async (e) => {
   const user = e.detail;
+  // Già sbloccato (password ripresa dopo un ricaricamento): niente richiesta
+  if (syncState.isEncReady) {
+    showSyncStep('synced', user, false);
+    updateSyncUI();
+    return;
+  }
   // Controlla se ha già configurato la cifratura
-  const hasSetup = await (await import('./js/sync.js')).hasEncryptionSetup
-    ? (await import('./js/sync.js')).hasEncryptionSetup()
-    : false;
+  const { hasEncryptionSetup } = await import('./js/sync.js');
+  const hasSetup = await hasEncryptionSetup();
   showSyncStep(hasSetup ? 'unlock' : 'setup', user);
 });
 
@@ -344,7 +349,7 @@ function closeSyncModal() {
   setTimeout(() => o.style.display = 'none', 250);
 }
 
-function showSyncStep(step, user = null) {
+function showSyncStep(step, user = null, apri = true) {
   document.querySelectorAll('.sync-step').forEach(s => s.classList.remove('active'));
   document.getElementById(`step-${step}`)?.classList.add('active');
   if (user) {
@@ -355,7 +360,7 @@ function showSyncStep(step, user = null) {
     });
   }
   if (step === 'synced') updateLastSyncTime();
-  openSyncModal();
+  if (apri) openSyncModal();
 }
 
 function updateLastSyncTime() {

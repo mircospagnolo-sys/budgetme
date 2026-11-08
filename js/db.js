@@ -408,6 +408,29 @@ export async function totaleEntrateMese(mese_id) {
   return regs.filter(r => ids.has(r.voce_id)).reduce((s,r) => s + (r.importo_reale||0), 0);
 }
 
+// Saldo di ogni conto attivo alla fine del giorno `data` (YYYY-MM-DD).
+// Senza data conta tutti i movimenti. I trasferimenti scalano il conto di
+// origine e accreditano quello di destinazione.
+export async function saldiContiAl(data = null) {
+  const [conti, movs] = await Promise.all([
+    db.conti_correnti.where('attivo').equals(1).toArray(),
+    db.movimenti_conto.toArray()
+  ]);
+  const saldi = Object.fromEntries(conti.map(c => [c.id, c.saldo_iniziale || 0]));
+  movs.forEach(m => {
+    if (data && !(m.data && m.data <= data)) return;
+    if (m.tipo === 'entrata') {
+      if (m.conto_id in saldi) saldi[m.conto_id] += m.importo;
+    } else if (m.tipo === 'uscita') {
+      if (m.conto_id in saldi) saldi[m.conto_id] -= m.importo;
+    } else if (m.tipo === 'trasferimento') {
+      if (m.conto_id in saldi) saldi[m.conto_id] -= m.importo;
+      if (m.conto_dest_id in saldi) saldi[m.conto_dest_id] += m.importo;
+    }
+  });
+  return { conti, saldi };
+}
+
 export async function saldoContiCorrenti() {
   const conti = await db.conti_correnti.where('attivo').equals(1).toArray();
   let tot = 0;
