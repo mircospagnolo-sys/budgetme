@@ -224,6 +224,10 @@
     <button class="btn btn-ghost btn-full" id="btn-import">
       <i data-lucide="upload"></i> Ripristina da backup
     </button>
+    <div class="mt-8"></div>
+    <button class="btn btn-ghost btn-full" id="btn-nuovo-periodo">
+      Inizia un nuovo periodo
+    </button>
     <p class="section-title mt-24">Info app</p>
     <div class="card" style="font-size:0.82rem;color:var(--text-sub)">
       <p><strong>BudgetMe</strong> v1.0</p>
@@ -249,7 +253,8 @@ const _fbDb   = firebase.firestore();
 
 <script type="module">
 import { initRouter }    from './js/router.js';
-import { downloadBackup, triggerImport, checkBackupReminder } from './js/backup.js';
+// import { downloadBackup, triggerImport, checkBackupReminder } from './js/backup.js';
+import { downloadBackup, triggerImport, checkBackupReminder, iniziaNuovoPeriodo } from './js/backup.js';
 import { initFirebase, loginWithGoogle, logout, setupEncryption,
          unlockWithPassword, uploadData, downloadData,
          syncState, updateSyncUI } from './js/sync.js';
@@ -267,6 +272,10 @@ lucide.createIcons();
 // Backup
 document.getElementById('btn-export').addEventListener('click', downloadBackup);
 document.getElementById('btn-import').addEventListener('click', triggerImport);
+document.getElementById('btn-nuovo-periodo').addEventListener('click', () => {
+  closeSettings();
+  iniziaNuovoPeriodo();
+});
 if (checkBackupReminder()) {
   document.getElementById('backup-reminder').classList.remove('hidden');
 }

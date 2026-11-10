@@ -758,6 +758,7 @@ async function renderRiconciliazione() {
   const saldoCalcolato = Object.values(fine.saldi).reduce((s,v)=>s+v,0);
   const altre = saldoCalcolato - (saldoApertura + totEnt - totUsc);
   const isMeseChiuso = currentMese.stato === 'chiuso';
+  const rie = isMeseChiuso ? currentMese.riepilogo_anno : null;
 
   root.innerHTML = `
     <div class="card" style="margin-bottom:12px">
@@ -792,7 +793,7 @@ async function renderRiconciliazione() {
       <div style="font-size:0.82rem;font-weight:700;color:var(--gray);margin-bottom:8px">
         🔒 Mese chiuso il ${ricons[0]?.data_chiusura ? formatDate(ricons[0].data_chiusura) : '—'}
       </div>
-      ${ricons.map(r => `
+            ${ricons.map(r => `
       <div style="padding:6px 0;border-top:1px solid var(--border)">
         <div style="font-size:0.82rem;font-weight:600">${escH(contiMap[r.conto_id]?.nome || 'Conto')}</div>
         <div style="display:flex;justify-content:space-between;font-size:0.85rem">
@@ -802,8 +803,57 @@ async function renderRiconciliazione() {
              color:${(r.differenza || 0) >= -0.005 ? 'var(--green)' : 'var(--red)'}">
           <span>Differenza</span><span>${formatEur(r.differenza ?? 0, true)}</span>
         </div>
+        ${Math.abs(r.differenza || 0) >= 0.005 ? (r.rettifica_id
+          ? `<div style="font-size:0.75rem;color:var(--text-muted);margin-top:4px">✓ Rettifica registrata</div>`
+          : `<button class="btn btn-ghost btn-sm" style="margin-top:6px"
+               onclick="window.registraRettifica(${r.id})">Registra rettifica di ${formatEur(Math.abs(r.differenza))}</button>`) : ''}
       </div>`).join('')}
-    </div>
+        </div>
+    ${rie ? `
+    <div class="card" style="margin-bottom:12px">
+      <div class="card-title">RIEPILOGO ${rie.anno}</div>
+      <div style="display:flex;flex-direction:column;gap:8px;font-size:0.88rem">
+        <div style="display:flex;justify-content:space-between">
+          <span style="color:var(--green)">Entrate</span>
+          <span style="font-weight:600;color:var(--green)">${formatEur(rie.entrate)}</span>
+        </div>
+        <div style="display:flex;justify-content:space-between">
+          <span style="color:var(--red)">Uscite</span>
+          <span style="font-weight:600;color:var(--red)">${formatEur(rie.uscite)}</span>
+        </div>
+        <div style="display:flex;justify-content:space-between">
+          <span style="font-weight:700">Saldo</span>
+          <span style="font-weight:700;color:${rie.saldo >= 0 ? 'var(--green)' : 'var(--red)'}">${formatEur(rie.saldo, true)}</span>
+        </div>
+        <div style="display:flex;justify-content:space-between">
+          <span style="color:var(--text-muted)">Tasso di risparmio</span>
+          <span style="font-weight:600">${(rie.tasso_risparmio ?? 0).toFixed(1)}%</span>
+        </div>
+        ${rie.straordinarie > 0 ? `
+        <div style="display:flex;justify-content:space-between;font-size:0.8rem">
+          <span style="color:var(--text-muted)">Entrate straordinarie (non contate)</span>
+          <span>${formatEur(rie.straordinarie)}</span>
+        </div>` : ''}
+        ${rie.risparmio > 0 ? `
+        <div style="display:flex;justify-content:space-between;font-size:0.8rem">
+          <span style="color:var(--text-muted)">Risparmio e investimenti versati (non contati)</span>
+          <span>${formatEur(rie.risparmio)}</span>
+        </div>` : ''}
+        <div style="border-top:2px solid var(--border);padding-top:8px;font-weight:700">
+          Saldo reale dei conti al 31/12
+        </div>
+        ${(rie.conti || []).map(c => `
+        <div style="display:flex;justify-content:space-between">
+          <span>${escH(c.nome)}</span><span>${formatEur(c.saldo_reale)}</span>
+        </div>`).join('')}
+        <div style="display:flex;justify-content:space-between;font-weight:700">
+          <span>Totale</span><span>${formatEur(rie.saldo_totale_reale)}</span>
+        </div>
+        <div style="font-size:0.72rem;color:var(--text-muted)">
+          Mesi chiusi nell'anno: ${rie.mesi_chiusi} su 12 · chiuso il ${formatDate(rie.chiuso_il)}
+        </div>
+      </div>
+    </div>` : ''}
     <button class="btn btn-ghost btn-full" onclick="window.riapreMese()">🔓 Riapri mese</button>
     ` : (conti.length === 0 ? `
     <div class="empty-state"><p>Nessun conto attivo.<br>Aggiungine uno in Patrimonio → Conti.</p></div>
@@ -1423,7 +1473,7 @@ function setupGlobals() {
     await apriVoce(voceId,voceName,prevDefault);
   };
 
-    window.chiudiMese = async () => {
+      window.chiudiMese = async () => {
     // Un saldo reale per ogni conto attivo
     const righe = [];
     for (const c of riconc.conti) {
@@ -1432,7 +1482,20 @@ function setupGlobals() {
       righe.push({ conto: c, reale: v });
     }
     if (righe.length === 0) { alert('Nessun conto attivo'); return; }
-    if (!confirm(`Chiudere ${MESI_NOMI[currentMeseNum]} ${currentAnno}?`)) return;
+        // A dicembre: avvisa se altri mesi dell'anno con movimenti non sono chiusi
+    let avviso = '';
+    if (currentMeseNum === 12) {
+      const [movsAnno, mesiAnno] = await Promise.all([
+        db.movimenti_conto.where('data')
+          .between(`${currentAnno}-01-01`, `${currentAnno}-12-31`, true, true).toArray(),
+        db.mesi.where('anno').equals(currentAnno).toArray()
+      ]);
+      const chiusi = new Set(mesiAnno.filter(m => m.stato === 'chiuso').map(m => m.mese));
+      const aperti = [...new Set(movsAnno.map(m => parseInt(m.data.slice(5, 7))))]
+        .filter(n => n !== 12 && !chiusi.has(n)).sort((a, b) => a - b);
+      if (aperti.length) avviso = `\n\nMesi con movimenti non ancora chiusi: ${aperti.map(n => MESI_NOMI[n]).join(', ')}.`;
+    }
+    if (!confirm(`Chiudere ${MESI_NOMI[currentMeseNum]} ${currentAnno}?${avviso}`)) return;
 
     let totCalcolato = 0;
     for (const { conto, reale } of righe) {
@@ -1446,15 +1509,62 @@ function setupGlobals() {
       });
     }
     await db.mesi.update(currentMese.id, { stato: 'chiuso', saldo_chiusura: totCalcolato });
+
+    // Chiusura di dicembre: salva anche il riepilogo dell'anno
+    if (currentMeseNum === 12) {
+      const { calcolaRiepilogoAnno } = await import(`./analisi.js?v=${Date.now()}`);
+      const r = await calcolaRiepilogoAnno(currentAnno);
+      const mesiAnno = await db.mesi.where('anno').equals(currentAnno).toArray();
+      await db.mesi.update(currentMese.id, { riepilogo_anno: {
+        anno: currentAnno, chiuso_il: today(),
+        entrate: r.totEntrate, uscite: r.totUscite,
+        straordinarie: r.totStraord, risparmio: r.totRisp,
+        saldo: r.totEntrate - r.totUscite,
+        tasso_risparmio: Math.round(r.tassoRisparmio * 10) / 10,
+        mesi_chiusi: mesiAnno.filter(m => m.stato === 'chiuso').length,
+        conti: righe.map(({ conto, reale }) => ({
+          conto_id: conto.id, nome: conto.nome, saldo_reale: reale,
+          saldo_calcolato: riconc.calcolati[conto.id] ?? 0
+        })),
+        saldo_totale_reale: righe.reduce((s, x) => s + x.reale, 0)
+      }});
+    }
+
     currentMese = await db.mesi.get(currentMese.id);
     toast(`${MESI_NOMI[currentMeseNum]} chiuso ✓`, 'success');
     await renderStatoBadge();
     await renderRiconciliazione();
   };
 
-  window.riapreMese = async () => {
-    if (!confirm('Riaprire il mese?')) return;
-    await db.mesi.update(currentMese.id,{stato:'in_corso',saldo_chiusura:undefined});
+    window.registraRettifica = async (riconcId) => {
+    const r = await db.riconciliazioni.get(riconcId);
+    if (!r || r.rettifica_id || Math.abs(r.differenza || 0) < 0.005) return;
+    const conto = await db.conti_correnti.get(r.conto_id);
+    const diff  = r.differenza;
+    const data  = fineMese(currentAnno, currentMeseNum);
+    if (!confirm(`Registrare una rettifica di ${formatEur(diff, true)} su "${conto?.nome || 'conto'}" con data ${formatDate(data)}?`)) return;
+
+    const movId = await db.movimenti_conto.add({
+      conto_id: r.conto_id, data, tipo: diff > 0 ? 'entrata' : 'uscita',
+      importo: Math.round(Math.abs(diff) * 100) / 100,
+      descrizione: `Rettifica saldo ${MESI_NOMI[currentMeseNum]} ${currentAnno}`,
+      categoria: 'Rettifica saldo', conto_dest_id: null,
+      categorizzato: 1, voce_budget_id: null, rettifica: 1
+    });
+    await db.riconciliazioni.update(riconcId, { rettifica_id: movId });
+    toast('Rettifica registrata', 'success');
+    await renderRiconciliazione();
+  };
+
+    window.riapreMese = async () => {
+    const ricons = await db.riconciliazioni.where('mese_id').equals(currentMese.id).toArray();
+    const idRettifiche = ricons.map(r => r.rettifica_id).filter(Boolean);
+    const msg = idRettifiche.length
+      ? 'Riaprire il mese? Verranno eliminate anche le rettifiche registrate.'
+      : 'Riaprire il mese?';
+    if (!confirm(msg)) return;
+    for (const id of idRettifiche) await db.movimenti_conto.delete(id);
+    await db.mesi.update(currentMese.id,{stato:'in_corso',saldo_chiusura:undefined,riepilogo_anno:undefined});
     await db.riconciliazioni.where('mese_id').equals(currentMese.id).delete();
     currentMese = await db.mesi.get(currentMese.id);
     toast('Mese riaperto');

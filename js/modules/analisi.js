@@ -1,6 +1,6 @@
 /* BudgetMe — analisi.js */
 import db from '../db.js';
-import { formatEur, MESI_NOMI } from '../utils.js';
+import { formatEur, formatDate, MESI_NOMI } from '../utils.js';
 
 // ── CONFIGURAZIONE ───────────────────────────────────────────────────────────
 // Categorie che non sono spese: restano fuori dalle uscite e da "Top categorie"
@@ -25,19 +25,9 @@ async function intervalloAnni() {
   return [Math.min(...anni), Math.max(...anni)];
 }
 
-export async function init() {
-  annoSel = new Date().getFullYear();
-  await render();
-}
-
-async function render() {
-  const root = document.getElementById('analisi-root');
-  root.innerHTML = `<div class="spinner" style="margin:32px auto"></div>`;
-  if (chartTrend) { chartTrend.destroy(); chartTrend = null; }
-
-  const anno = annoSel;
-  const [annoMin, annoMax] = await intervalloAnni();
-
+// ── CALCOLO DELL'ANNO ────────────────────────────────────────────────────────
+// Usato da Analisi e dalla chiusura di dicembre (mese.js)
+export async function calcolaRiepilogoAnno(anno) {
   const [mesi, cats, voci, regs, movsVoce] = await Promise.all([
     db.mesi.where('anno').equals(anno).toArray(),
     db.categorie_budget.toArray(),
@@ -81,17 +71,21 @@ async function render() {
       const movs = await db.movimenti_conto
         .where('data').between(dataInizio, dataFine, true, true).toArray();
 
+            // Le rettifiche di saldo non sono né entrate né spese
+      const reali = movs.filter(m => !m.rettifica);
       return {
         mese: meseNum,
-        entrate:       somma(movs.filter(m => m.tipo === 'entrata' && !isStraord(m))),
-        uscite:        somma(movs.filter(m => m.tipo === 'uscita'  && !isNonSpesa(m))),
-        straordinarie: somma(movs.filter(m => m.tipo === 'entrata' &&  isStraord(m))),
-        risparmio:     somma(movs.filter(m => m.tipo === 'uscita'  &&  isNonSpesa(m)))
+        entrate:       somma(reali.filter(m => m.tipo === 'entrata' && !isStraord(m))),
+        uscite:        somma(reali.filter(m => m.tipo === 'uscita'  && !isNonSpesa(m))),
+        straordinarie: somma(reali.filter(m => m.tipo === 'entrata' &&  isStraord(m))),
+        risparmio:     somma(reali.filter(m => m.tipo === 'uscita'  &&  isNonSpesa(m))),
+        rettifiche:    somma(movs.filter(m => m.rettifica && m.tipo === 'entrata'))
+                     - somma(movs.filter(m => m.rettifica && m.tipo === 'uscita'))
       };
     })
   );
 
-  // ── Top categorie di spesa (solo anno selezionato, senza risparmio/investimenti) ──
+  // ── Top categorie di spesa (solo anno scelto, senza risparmio/investimenti) ──
   // Reale di una voce in un mese: movimenti voce se esistono, altrimenti importo diretto
   const idMesiAnno = new Set(mesi.map(m => m.id));
   const movPerVoceMese = {};
@@ -126,16 +120,42 @@ async function render() {
   const totUscite  = datiMesi.reduce((s, m) => s + m.uscite, 0);
   const totStraord = datiMesi.reduce((s, m) => s + m.straordinarie, 0);
   const totRisp    = datiMesi.reduce((s, m) => s + m.risparmio, 0);
+  const totRett    = datiMesi.reduce((s, m) => s + m.rettifiche, 0);
   const mesiConDati = datiMesi.filter(m => m.entrate > 0 || m.uscite > 0).length || 1;
   const mediaEntrate = totEntrate / mesiConDati;
   const mediaUscite  = totUscite  / mesiConDati;
   const mediaSaldo   = mediaEntrate - mediaUscite;
+  const tassoRisparmio = totEntrate > 0 ? (mediaSaldo / mediaEntrate) * 100 : 0;
+  const haDati = datiMesi.some(m => m.entrate > 0 || m.uscite > 0 || m.straordinarie > 0 || m.risparmio > 0);
+
+  return { anno, mesi, datiMesi, topCat, totSpeseCat,
+           totEntrate, totUscite, totStraord, totRisp, totRett,
+           mediaEntrate, mediaUscite, mediaSaldo, tassoRisparmio, haDati };
+}
+
+export async function init() {
+  annoSel = new Date().getFullYear();
+  await render();
+}
+
+async function render() {
+  const root = document.getElementById('analisi-root');
+  root.innerHTML = `<div class="spinner" style="margin:32px auto"></div>`;
+  if (chartTrend) { chartTrend.destroy(); chartTrend = null; }
+
+  const anno = annoSel;
+  const [annoMin, annoMax] = await intervalloAnni();
+  const r = await calcolaRiepilogoAnno(anno);
+  const { datiMesi, topCat, totSpeseCat, totEntrate, totUscite, totStraord, totRisp, totRett,
+          mediaEntrate, mediaUscite, mediaSaldo, tassoRisparmio, haDati } = r;
+
+  // Riepilogo salvato alla chiusura di dicembre (se l'anno è chiuso)
+  const rie = r.mesi.find(m => m.mese === 12)?.riepilogo_anno || null;
 
   const esclusi = [];
   if (totStraord > 0) esclusi.push(`entrate straordinarie ${formatEur(totStraord)}`);
   if (totRisp > 0)    esclusi.push(`risparmio e investimenti versati ${formatEur(totRisp)}`);
-
-  const haDati = datiMesi.some(m => m.entrate > 0 || m.uscite > 0 || m.straordinarie > 0 || m.risparmio > 0);
+  if (Math.abs(totRett) >= 0.005) esclusi.push(`rettifiche di saldo ${formatEur(totRett, true)}`);
 
   // Selettore anno
   const BTN = 'width:36px;height:36px;border-radius:50%;border:1px solid var(--border);' +
@@ -151,6 +171,10 @@ async function render() {
       <button id="an-succ" aria-label="Anno successivo"
               style="${BTN};${anno >= annoMax ? spento : ''}" ${anno >= annoMax ? 'disabled' : ''}>›</button>
     </div>
+    ${rie ? `
+    <div style="text-align:center;font-size:0.78rem;color:var(--text-muted);margin:-4px 0 12px">
+      🔒 Anno chiuso il ${formatDate(rie.chiuso_il)} · saldo reale conti ${formatEur(rie.saldo_totale_reale)}
+    </div>` : ''}
 
     ${haDati ? '' : `
     <div class="empty-state" style="padding:24px"><p>Nessun movimento nel ${anno}.</p></div>`}
@@ -175,7 +199,7 @@ async function render() {
       <div class="kpi-card">
         <div class="label">Tasso risparmio</div>
         <div class="value ${mediaSaldo>=0?'text-positive':'text-negative'}">
-          ${totEntrate > 0 ? ((mediaSaldo/mediaEntrate)*100).toFixed(1) : '0.0'}%
+          ${tassoRisparmio.toFixed(1)}%
         </div>
       </div>
     </div>
