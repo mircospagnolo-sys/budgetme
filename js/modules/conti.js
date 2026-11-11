@@ -1,5 +1,5 @@
 /* BudgetMe — conti.js */
-import db from '../db.js';
+import db, { saldiContiAl } from '../db.js';
 import { formatEur, formatDate, toast, openModal, closeModal,
          confirmAction, today } from '../utils.js';
 
@@ -88,21 +88,9 @@ async function render() {
   const root = document.getElementById('conti-root') ||
                document.getElementById('content');
 
-  const conti = await db.conti_correnti.where('attivo').equals(1).toArray();
-
-  // Calcola saldo reale per ogni conto
-  const contiConSaldo = await Promise.all(conti.map(async c => {
-    const movimenti = await db.movimenti_conto
-      .where('conto_id').equals(c.id).toArray();
-    const delta = movimenti.reduce((s, m) => {
-      if (m.tipo === 'entrata')       return s + m.importo;
-      if (m.tipo === 'uscita')        return s - m.importo;
-      if (m.tipo === 'trasferimento' && m.conto_dest_id === c.id) return s + m.importo;
-      if (m.tipo === 'trasferimento') return s - m.importo;
-      return s;
-    }, 0);
-    return { ...c, saldoReale: (c.saldo_iniziale || 0) + delta };
-  }));
+    // Saldi calcolati da db.js: stessa regola di Home e Chiusura mese
+  const { conti: contiLista, saldi } = await saldiContiAl();
+  const contiConSaldo = contiLista.map(c => ({ ...c, saldoReale: saldi[c.id] ?? 0 }));
 
   const totale = contiConSaldo.reduce((s, c) => s + c.saldoReale, 0);
 

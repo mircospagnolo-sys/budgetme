@@ -1,6 +1,7 @@
 /* BudgetMe — dashboard.js v3
    Interroga il DB direttamente per evitare dipendenze da versioni cache */
-import db, { getOrCreateMeseCorrente } from '../db.js';
+// import db, { getOrCreateMeseCorrente } from '../db.js';
+import db, { getOrCreateMeseCorrente, saldiContiAl } from '../db.js';
 import { formatEur, formatPct, MESI_NOMI } from '../utils.js';
 
 export async function init() {
@@ -46,10 +47,7 @@ export async function init() {
     } catch(e) { console.warn('portafoglio init:', e); }
 
     // ── Patrimonio: query diretta al DB ────────────────────────────────────
-    const [conti, movimentiConto, depositi, vincoli,
-           strumenti, beni, regsAll, cats, voci] = await Promise.all([
-      db.conti_correnti.toArray(),
-      db.movimenti_conto.toArray(),
+        const [depositi, vincoli, strumenti, beni, regsAll, cats, voci] = await Promise.all([
       db.conti_deposito.toArray(),
       db.vincoli_deposito.toArray(),
       db.strumenti_portafoglio.toArray(),
@@ -59,17 +57,9 @@ export async function init() {
       db.voci_budget.where('attiva').equals(1).toArray()
     ]);
 
-    // Saldo conti correnti
-    let totCC = 0;
-    for (const c of conti.filter(c => c.attivo === 1 || c.attivo === true)) {
-      const movs = movimentiConto.filter(m => m.conto_id === c.id);
-      const delta = movs.reduce((s, m) => {
-        if (m.tipo === 'entrata') return s + m.importo;
-        if (m.tipo === 'uscita')  return s - m.importo;
-        return s;
-      }, 0);
-      totCC += (c.saldo_iniziale || 0) + delta;
-    }
+    // Saldo conti correnti: stessa regola di Chiusura mese e Patrimonio (db.js)
+    const { saldi: saldiCC } = await saldiContiAl();
+    const totCC = Object.values(saldiCC).reduce((s, v) => s + v, 0);
 
     // Depositi: somma vincoli attivi + liquidità libera
     const vincoliAttivi = vincoli.filter(v => v.stato === 'attivo');

@@ -408,15 +408,16 @@ export async function totaleEntrateMese(mese_id) {
   return regs.filter(r => ids.has(r.voce_id)).reduce((s,r) => s + (r.importo_reale||0), 0);
 }
 
-// Saldo di ogni conto attivo alla fine del giorno `data` (YYYY-MM-DD).
+// Saldo di ogni conto alla fine del giorno `data` (YYYY-MM-DD).
 // Senza data conta tutti i movimenti. I trasferimenti scalano il conto di
-// origine e accreditano quello di destinazione.
+// origine e accreditano quello di destinazione. Restituisce i conti attivi
+// e quelli disattivati che a quella data hanno ancora un saldo.
 export async function saldiContiAl(data = null) {
-  const [conti, movs] = await Promise.all([
-    db.conti_correnti.where('attivo').equals(1).toArray(),
+  const [tutti, movs] = await Promise.all([
+    db.conti_correnti.toArray(),
     db.movimenti_conto.toArray()
   ]);
-  const saldi = Object.fromEntries(conti.map(c => [c.id, c.saldo_iniziale || 0]));
+  const saldi = Object.fromEntries(tutti.map(c => [c.id, c.saldo_iniziale || 0]));
   movs.forEach(m => {
     if (data && !(m.data && m.data <= data)) return;
     if (m.tipo === 'entrata') {
@@ -428,18 +429,16 @@ export async function saldiContiAl(data = null) {
       if (m.conto_dest_id in saldi) saldi[m.conto_dest_id] += m.importo;
     }
   });
-  return { conti, saldi };
+  const conti = tutti.filter(c =>
+    c.attivo === 1 || c.attivo === true || Math.abs(saldi[c.id]) >= 0.005);
+  const out = {};
+  conti.forEach(c => { out[c.id] = saldi[c.id]; });
+  return { conti, saldi: out };
 }
 
 export async function saldoContiCorrenti() {
-  const conti = await db.conti_correnti.where('attivo').equals(1).toArray();
-  let tot = 0;
-  for (const c of conti) {
-    const mov = await db.movimenti_conto.where('conto_id').equals(c.id).toArray();
-    tot += (c.saldo_iniziale||0) + mov.reduce((s,m) =>
-      m.tipo==='entrata' ? s+m.importo : m.tipo==='uscita' ? s-m.importo : s, 0);
-  }
-  return tot;
+  const { saldi } = await saldiContiAl();
+  return Object.values(saldi).reduce((s, v) => s + v, 0);
 }
 
 export async function totaleDepositi() {
