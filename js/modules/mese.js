@@ -88,10 +88,26 @@ const sommaRighe = (righe, campo) => righe.reduce((s, r) => s + r[campo], 0);
 
 export async function init() {
   setupGlobals();
+
+  // Arrivo dalla Home: apre il mese, la scheda e il filtro richiesti
+  let intent = null;
+  try { intent = JSON.parse(sessionStorage.getItem('meseIntent') || 'null'); } catch (e) {}
+  sessionStorage.removeItem('meseIntent');
+  if (intent) {
+    if (intent.anno && intent.mese) { currentAnno = intent.anno; currentMeseNum = intent.mese; }
+    if (intent.tab) {
+      currentTab = intent.tab;
+      document.querySelectorAll('#mese-tabs .tab-btn').forEach(b =>
+        b.classList.toggle('active', b.dataset.tab === currentTab));
+    }
+    if (intent.daCat) filtroMov = { q: '', tipo: 'tutti', conto: '', daCat: true };
+  }
+
   await loadMese();
   setupNavMese();
   setupTabs();
   await renderTab();
+  if (intent?.nuovo) window.apriNuovoMovimento();
 }
 
 async function loadMese() {

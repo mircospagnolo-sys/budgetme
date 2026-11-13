@@ -13,6 +13,10 @@ export async function navigate(routeName) {
   const route = routes[routeName];
   const content = document.getElementById('content');
 
+
+  // Pulsanti creati dai moduli (+ flottante, + Conto): ogni pagina li ricrea se servono
+  document.querySelectorAll('.fab, #btn-nuovo-conto').forEach(el => el.remove());
+
   document.querySelectorAll('.nav-item').forEach(el =>
     el.classList.toggle('active', el.dataset.route === routeName));
   document.getElementById('page-title').textContent = route.label;
