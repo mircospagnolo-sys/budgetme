@@ -95,16 +95,19 @@ async function render() {
     return;
   }
 
-  // Calcola totali
+  // Calcola totali: contano solo i depositi aperti e i vincoli attivi (come in Home)
   let totaleCapitale = 0, totaleInteressi = 0, totaleLiquido = 0;
   const depositiConDati = await Promise.all(depositi.map(async dep => {
     const vincoli = await db.vincoli_deposito.where('deposito_id').equals(dep.id).toArray();
     const cedole  = await db.cedole_deposito.where('deposito_id').equals(dep.id).toArray();
-    const capitaleVincoli = vincoli.reduce((s, v) => s + (v.importo || 0), 0);
-    const interessiAttesi = vincoli.reduce((s, v) => s + (v.interessi_netti || 0), 0);
-    totaleCapitale  += capitaleVincoli;
-    totaleInteressi += interessiAttesi;
-    totaleLiquido   += (dep.somma_libera || 0);
+    const attivi  = vincoli.filter(v => v.stato === 'attivo');
+    const capitaleVincoli = attivi.reduce((s, v) => s + (v.importo || 0), 0);
+    const interessiAttesi = attivi.reduce((s, v) => s + (v.interessi_netti || 0), 0);
+    if (dep.stato !== 'chiuso') {
+      totaleCapitale  += capitaleVincoli;
+      totaleInteressi += interessiAttesi;
+      totaleLiquido   += (dep.somma_libera || 0);
+    }
     return { ...dep, vincoli, cedole, capitaleVincoli, interessiAttesi };
   }));
 
@@ -133,10 +136,10 @@ async function render() {
   for (const dep of depositiConDati) {
     const cedolePendenti = dep.cedole.filter(c => !c.incassata);
     html += `
-    <div class="dep-card">
+    <div class="dep-card" style="${dep.stato === 'chiuso' ? 'opacity:0.6' : ''}">
       <div class="dep-card-header">
         <div class="dep-card-left">
-          <div class="dep-nome">${dep.nome}</div>
+                    <div class="dep-nome">${dep.nome}${dep.stato === 'chiuso' ? ' <span class="vinc-badge badge-red">chiuso</span>' : ''}</div>
           <div class="dep-banca">${dep.banca}</div>
           ${dep.note ? `<div style="font-size:0.75rem;color:var(--text-muted);margin-top:2px">${dep.note}</div>` : ''}
           ${cedolePendenti.length > 0 ? `
@@ -267,6 +270,7 @@ window._nuovoDeposito = () => {
   document.getElementById('modal-dep-title').textContent = 'Nuovo conto deposito';
   ['dep-nome','dep-banca','dep-note'].forEach(id => document.getElementById(id).value = '');
   document.getElementById('dep-libera').value = '';
+  document.getElementById('dep-stato').value = 'aperto';
   openDepModal('modal-deposito');
 };
 
@@ -279,6 +283,7 @@ async function editDeposito(id) {
   document.getElementById('dep-banca').value  = dep.banca;
   document.getElementById('dep-libera').value = dep.somma_libera || '';
   document.getElementById('dep-note').value   = dep.note || '';
+  document.getElementById('dep-stato').value  = dep.stato === 'chiuso' ? 'chiuso' : 'aperto';
   openDepModal('modal-deposito');
 }
 
@@ -287,8 +292,9 @@ async function saveDeposito() {
   const banca  = document.getElementById('dep-banca').value.trim();
   const libera = parseFloat(document.getElementById('dep-libera').value) || 0;
   const note   = document.getElementById('dep-note').value.trim();
+  const stato  = document.getElementById('dep-stato').value;
   if (!nome || !banca) { alert('Inserisci nome e banca'); return; }
-  const data = { nome, banca, somma_libera: libera, stato: 'aperto', note };
+  const data = { nome, banca, somma_libera: libera, stato, note };
   if (editingDepId) await db.conti_deposito.update(editingDepId, data);
   else await db.conti_deposito.add({ ...data, importo: 0 });
   closeDepModal('modal-deposito');
@@ -357,16 +363,23 @@ async function saveVincolo() {
   const importo = parseFloat(document.getElementById('vinc-importo').value) || 0;
   const depId   = parseInt(document.getElementById('vinc-deposito-id').value);
   if (!importo) { alert('Inserisci l\'importo'); return; }
+  const decorrenza = document.getElementById('vinc-decorrenza').value;
+  const scadenza   = document.getElementById('vinc-scadenza').value;
+  const dataOk = d => d === '' || /^20\d\d-\d\d-\d\d$/.test(d);
+  if (!dataOk(decorrenza) || !dataOk(scadenza)) {
+    alert('Controlla le date: anno non valido'); return;
+  }
   const data = {
     deposito_id:    depId,
     numero:         document.getElementById('vinc-numero').value.trim(),
-    data_decorrenza:document.getElementById('vinc-decorrenza').value,
-    data_scadenza:  document.getElementById('vinc-scadenza').value,
+    data_decorrenza:decorrenza,
+    data_scadenza:  scadenza,
     tasso_lordo:    parseFloat(document.getElementById('vinc-tasso').value) || 0,
     importo,
     interessi_netti:parseFloat(document.getElementById('vinc-interessi').value) || 0,
     svincolabile:   parseInt(document.getElementById('vinc-svincolabile').value),
-    stato: 'attivo'
+    stato:          document.getElementById('vinc-stato').value,
+    tipo_erogazione:document.getElementById('vinc-erogazione').value
   };
   if (editingVincId) await db.vincoli_deposito.update(editingVincId, data);
   else await db.vincoli_deposito.add(data);

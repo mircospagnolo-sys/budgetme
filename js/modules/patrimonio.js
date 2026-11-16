@@ -3,6 +3,14 @@
 let currentTab = 'conti';
 
 export async function init() {
+  // Arrivo dalla Home: apre la scheda richiesta
+  const richiesta = sessionStorage.getItem('patrimonioTab');
+  sessionStorage.removeItem('patrimonioTab');
+  if (['conti', 'depositi', 'investimenti'].includes(richiesta)) {
+    currentTab = richiesta;
+    document.querySelectorAll('#patrimonio-tabs .tab-btn').forEach(b =>
+      b.classList.toggle('active', b.dataset.tab === currentTab));
+  }
   setupTabs();
   await renderTab();
 }

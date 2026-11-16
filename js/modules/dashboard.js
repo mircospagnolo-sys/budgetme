@@ -17,6 +17,13 @@ function vaiAMese(intent) {
   navigate('mese');
 }
 
+
+// Apre Patrimonio su una scheda precisa (letto da patrimonio.js all'avvio)
+function vaiAPatrimonio(tab) {
+  sessionStorage.setItem('patrimonioTab', tab);
+  navigate('patrimonio');
+}
+
 // Dati del mio portafoglio, ricreati se le tabelle sono vuote
 async function inizializzaPortafoglio() {
   try {
@@ -80,9 +87,11 @@ export async function init() {
     const { saldi: saldiCC } = await saldiContiAl();
     const totCC = Object.values(saldiCC).reduce((s, v) => s + v, 0);
 
-    const vincoliAttivi = vincoli.filter(v => v.stato === 'attivo');
+        // Depositi: contano solo i depositi aperti e i loro vincoli attivi, più la liquidità libera
+    const depAperti = new Set(depositi.filter(d => d.stato !== 'chiuso').map(d => d.id));
+    const vincoliAttivi = vincoli.filter(v => v.stato === 'attivo' && depAperti.has(v.deposito_id));
     const totDep = vincoliAttivi.reduce((s, v) => s + (v.importo || 0), 0)
-                 + depositi.filter(d => d.stato === 'aperto')
+                 + depositi.filter(d => depAperti.has(d.id))
                            .reduce((s, d) => s + (d.somma_libera || 0), 0);
     const totInvest = strumenti.filter(s => s.attivo === 1 || s.attivo === true)
                                .reduce((s, st) => s + (st.valore_attuale || 0), 0);
@@ -102,8 +111,8 @@ export async function init() {
     const azioni = [];
 
     if (!conti.some(c => c.attivo === 1 || c.attivo === true)) {
-      azioni.push({ icona: '🏦', testo: 'Aggiungi il tuo primo conto',
-        dettaglio: 'Patrimonio → Conti', vai: () => navigate('patrimonio') });
+        azioni.push({ icona: '🏦', testo: 'Aggiungi il tuo primo conto',
+        dettaglio: 'Patrimonio → Conti', vai: () => vaiAPatrimonio('conti') });
     }
 
     // Movimenti da categorizzare, per mese (si parte dal più recente)
@@ -142,7 +151,7 @@ export async function init() {
     }));
 
     // Vincoli dei depositi scaduti o in scadenza entro 30 giorni
-    const depAperti = new Set(depositi.filter(d => d.stato === 'aperto').map(d => d.id));
+    // const depAperti = new Set(depositi.filter(d => d.stato === 'aperto').map(d => d.id));
     const nomeDep = Object.fromEntries(depositi.map(d => [d.id, d.nome]));
     const scadenze = vincoliAttivi
       .filter(v => depAperti.has(v.deposito_id) && v.data_scadenza)
@@ -152,11 +161,11 @@ export async function init() {
     scadenze.slice(0, 2).forEach(({ v, g }) => azioni.push({
       icona: '⏳', testo: `Vincolo ${esc(nomeDep[v.deposito_id])} · ${formatEur(v.importo)}`,
       dettaglio: g < 0 ? `scaduto da ${-g} giorni` : g === 0 ? 'scade oggi' : `scade tra ${g} giorni`,
-      vai: () => navigate('patrimonio')
+      vai: () => vaiAPatrimonio('depositi')
     }));
     if (scadenze.length > 2) {
       azioni.push({ icona: '⏳', testo: `e altri ${scadenze.length - 2} vincoli`,
-        dettaglio: 'scaduti o in scadenza entro 30 giorni', vai: () => navigate('patrimonio') });
+        dettaglio: 'scaduti o in scadenza entro 30 giorni', vai: () => vaiAPatrimonio('depositi') });
     }
 
     // Backup
@@ -240,19 +249,19 @@ export async function init() {
         <div class="card-title" style="color:rgba(255,255,255,0.75)">PATRIMONIO NETTO</div>
         <div class="card-value large" style="color:#fff">${formatEur(totPatrimonio)}</div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:12px">
-          <button class="home-pat" style="${TESSERA}">
+          <button class="home-pat" data-tab="conti" style="${TESSERA}">
             <div style="font-size:0.68rem;color:rgba(255,255,255,0.7)">🏦 Conti correnti</div>
             <div style="font-size:0.9rem;font-weight:700;color:white">${formatEur(totCC)}</div>
           </button>
-          <button class="home-pat" style="${TESSERA}">
+          <button class="home-pat" data-tab="depositi" style="${TESSERA}">
             <div style="font-size:0.68rem;color:rgba(255,255,255,0.7)">🏛 Conti deposito</div>
             <div style="font-size:0.9rem;font-weight:700;color:white">${formatEur(totDep)}</div>
           </button>
-          <button class="home-pat" style="${TESSERA}">
+          <button class="home-pat" data-tab="investimenti" style="${TESSERA}">
             <div style="font-size:0.68rem;color:rgba(255,255,255,0.7)">📈 Investimenti</div>
             <div style="font-size:0.9rem;font-weight:700;color:white">${formatEur(totInvest)}</div>
           </button>
-          <button class="home-pat" style="${TESSERA}">
+          <button class="home-pat" data-tab="investimenti" style="${TESSERA}">
             <div style="font-size:0.68rem;color:rgba(255,255,255,0.7)">🥇 Beni reali</div>
             <div style="font-size:0.9rem;font-weight:700;color:white">${formatEur(totBeni)}</div>
           </button>
@@ -290,7 +299,7 @@ export async function init() {
     content.querySelectorAll('.home-azione').forEach(b =>
       b.addEventListener('click', () => azioni[b.dataset.i].vai()));
     content.querySelectorAll('.home-pat').forEach(b =>
-      b.addEventListener('click', () => navigate('patrimonio')));
+      b.addEventListener('click', () => vaiAPatrimonio(b.dataset.tab)));
     document.getElementById('home-nuovo').addEventListener('click', () =>
       vaiAMese({ tab: 'movimenti', nuovo: true, anno: mese.anno, mese: mese.mese }));
     document.getElementById('home-chiudi').addEventListener('click', () =>
