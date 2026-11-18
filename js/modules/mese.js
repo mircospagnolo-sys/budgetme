@@ -579,6 +579,10 @@ async function renderMovimenti() {
         <div class="value text-negative">${formatEur(totUsc)}</div></div>
     </div>
 
+    <div style="display:flex;justify-content:flex-end;margin-bottom:8px">
+      <button class="btn btn-ghost btn-sm" onclick="window.apriImportEstratto()">📥 Importa estratto conto</button>
+    </div>
+
     <input type="search" id="mov-cerca" value="${escH(filtroMov.q)}"
            placeholder="Cerca per descrizione, categoria, conto o importo"
            style="${INP};margin-bottom:8px">
@@ -1273,6 +1277,18 @@ function setupGlobals() {
   window.apriNuovoMovimento  = apriNuovoMovimento;
   window.categorizzaMovimento = categorizzaMovimento;
   window.modificaMovimento   = modificaMovimento;
+
+  window.apriImportEstratto = async () => {
+    const { apriImportEstratto } = await import(`./importa.js?v=${Date.now()}`);
+    await apriImportEstratto(async (anno, mese) => {
+      // dopo l'import mostra il mese dell'estratto, già filtrato sui movimenti da categorizzare
+      currentAnno = anno; currentMeseNum = mese;
+      filtroMov = { q: '', tipo: 'tutti', conto: '', daCat: true };
+      await loadMese();
+      await renderTab();
+    });
+  };
+
   window.apriVoce            = apriVoce;
 
   window.azzeraFiltriMov = async () => {
