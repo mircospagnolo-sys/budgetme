@@ -3,6 +3,7 @@
 // import db, { getOrCreateMese, getPrevisioneVoce } from '../db.js';
 import db, { getOrCreateMese, getPrevisioneVoce, saldiContiAl } from '../db.js';
 import { formatEur, formatDate, today, toast, MESI_NOMI } from '../utils.js';
+import { BUSTE, calcolaBusteMese as calcolaBusteDi } from '../buste.js';
 
 const MODALITA_LABEL = {
   pos:'POS', credito:'Carta credito', ricaricabile:'Carta ricaricabile',
@@ -15,74 +16,14 @@ let currentMeseNum = new Date().getMonth() + 1;
 let currentMese    = null;
 let currentTab = 'piano';
 
-// ── MAPPA BUSTE ──────────────────────────────────────────────────────────────
-// Le voci elencate in "voci" hanno la precedenza sulla categoria.
-// I nomi devono coincidere con quelli in Budget → Gestione voci.
-const BUSTE = {
-  prima: {
-    cat:  ['Risparmio e Liquidità', 'Investimento Lungo Termine'],
-    voci: []
-  },
-  obblig: {
-    cat:  ['Spese Fisse Contrattuali', 'Canoni Bancari', 'Figli'],
-    voci: ['Utenze Luce + Gas', 'Utenza Acqua', 'Carburante / Auto']
-  },
-  persone: {
-    cat:  ['Spese Discrezionali'],
-    voci: []
-  },
-  gestione: {
-    cat:  ['Spese Variabili Necessarie', 'Spese Irregolari / Annuali', 'Fiscalità'],
-    voci: ['Farmacia / Salute', 'Casa / Varie', 'Casa / Fai da Te', 'Autolavaggio']
-  }
-};
-
 // Ultimo giorno del mese come 'YYYY-MM-DD', in ora locale (niente toISOString)
 function fineMese(anno, mese) {
   const ultimo = new Date(anno, mese, 0).getDate();
   return `${anno}-${String(mese).padStart(2, '0')}-${String(ultimo).padStart(2, '0')}`;
 }
 
-function bustaDi(voceNome, catNome) {
-  for (const [busta, def] of Object.entries(BUSTE)) {
-    if (def.voci.includes(voceNome)) return busta;
-  }
-  for (const [busta, def] of Object.entries(BUSTE)) {
-    if (def.cat.includes(catNome)) return busta;
-  }
-  return null;
-}
-
-// Piano e reale di ogni voce del mese, raggruppati per busta
-async function calcolaBusteMese() {
-  const [cats, voci, regs, movs, prevMens] = await Promise.all([
-    db.categorie_budget.toArray(),
-    db.voci_budget.where('attiva').equals(1).toArray(),
-    db.registrazioni.where('mese_id').equals(currentMese.id).toArray(),
-    db.movimenti_voce.where('mese_id').equals(currentMese.id).toArray(),
-    db.previsioni_mensili.where('mese_id').equals(currentMese.id).toArray()
-  ]);
-
-  const catMap  = Object.fromEntries(cats.map(c => [c.id, c]));
-  const regsMap = Object.fromEntries(regs.map(r => [r.voce_id, r]));
-  const prevMap = Object.fromEntries(prevMens.map(p => [p.voce_id, p.importo]));
-  const movsMap = {};
-  movs.forEach(m => { movsMap[m.voce_id] = (movsMap[m.voce_id] || 0) + m.importo; });
-
-  const out = { entrate: [], prima: [], obblig: [], persone: [], gestione: [], altro: [] };
-
-  for (const v of voci) {
-    const cat = catMap[v.categoria_id];
-    if (!cat) continue;
-    const reale = movsMap[v.id] ?? regsMap[v.id]?.importo_reale ?? 0;
-    const piano = prevMap[v.id] ?? regsMap[v.id]?.previsione_override ?? v.previsione_default ?? 0;
-    const riga  = { nome: v.nome, piano, reale };
-
-    if (cat.tipo === 'entrata') { out.entrate.push(riga); continue; }
-    out[bustaDi(v.nome, cat.nome) || 'altro'].push(riga);
-  }
-  return out;
-}
+// Piano e reale delle voci del mese corrente (il calcolo sta in buste.js)
+const calcolaBusteMese = () => calcolaBusteDi(currentMese.id);
 
 const sommaRighe = (righe, campo) => righe.reduce((s, r) => s + r[campo], 0);
 
@@ -108,6 +49,7 @@ export async function init() {
   setupTabs();
   await renderTab();
   if (intent?.nuovo) window.apriNuovoMovimento();
+  if (intent?.importa) window.apriImportEstratto();
 }
 
 async function loadMese() {
