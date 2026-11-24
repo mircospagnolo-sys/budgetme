@@ -650,6 +650,9 @@ export async function init() {
 function disegnaBarre(canvasId, righe, colorePredefinito) {
   const ctx = document.getElementById(canvasId)?.getContext('2d');
   if (!ctx) return;
+  // Colori dei grafici adattati al tema (chiaro o scuro)
+  Chart.defaults.color = getComputedStyle(document.documentElement)
+    .getPropertyValue('--text-muted').trim() || '#888';
   new Chart(ctx, {
     type: 'bar',
     data: {
@@ -669,7 +672,7 @@ function disegnaBarre(canvasId, righe, colorePredefinito) {
       },
       scales: {
         x: {
-          grid: { color: 'rgba(0,0,0,0.06)' },
+          grid: { color: 'rgba(128,128,128,0.2)' },
           ticks: { font: { size: 9 }, maxTicksLimit: 4,
             callback: v => v >= 1000 ? (v / 1000).toFixed(0) + 'k€' : v + '€' }
         },

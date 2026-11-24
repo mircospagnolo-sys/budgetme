@@ -199,7 +199,7 @@ async function render() {
       <div class="kpi-card">
         <div class="label">Tasso risparmio</div>
         <div class="value ${mediaSaldo>=0?'text-positive':'text-negative'}">
-          ${tassoRisparmio.toFixed(1)}%
+          ${tassoRisparmio.toFixed(1).replace('.', ',')}%
         </div>
       </div>
     </div>
@@ -286,6 +286,9 @@ async function render() {
   // Grafico trend
   const ctx = document.getElementById('chart-trend')?.getContext('2d');
   if (ctx) {
+    // Colori dei grafici adattati al tema (chiaro o scuro)
+    Chart.defaults.color = getComputedStyle(document.documentElement)
+      .getPropertyValue('--text-muted').trim() || '#888';
     chartTrend = new Chart(ctx, {
       type: 'bar',
       data: {
@@ -314,7 +317,7 @@ async function render() {
         scales: {
           x: { grid: { display: false }, ticks: { font: { size: 9 } } },
           y: {
-            grid: { color: 'rgba(0,0,0,0.05)' },
+            grid: { color: 'rgba(128,128,128,0.2)' },
             ticks: { font: { size: 9 }, callback: v => v >= 1000 ? (v/1000).toFixed(0)+'k€' : v+'€' }
           }
         }
