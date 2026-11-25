@@ -43,7 +43,7 @@
     --border:     #2c2c2a;
     --text:       #f0efe8;
     --text-sub:   #b4b2a9;
-    --text-muted: #666460;
+    --text-muted: #8b8982;
   }
 }
 
@@ -107,8 +107,8 @@ input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; }
 #content {
   flex: 1;
   margin-top: var(--header-h);
-  margin-bottom: var(--nav-h);
-  padding: 16px;
+  margin-bottom: calc(var(--nav-h) + env(safe-area-inset-bottom, 0px));
+  padding: 16px 16px 88px;   /* in fondo: spazio per il pulsante + */
   overflow-y: auto;
 }
 
@@ -116,7 +116,8 @@ input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; }
 #navbar {
   position: fixed;
   bottom: 0; left: 0; right: 0;
-  height: var(--nav-h);
+  height: calc(var(--nav-h) + env(safe-area-inset-bottom, 0px));
+  padding-bottom: env(safe-area-inset-bottom, 0px);
   background: var(--bg-nav);
   border-top: 1px solid var(--border);
   display: flex;

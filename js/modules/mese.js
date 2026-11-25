@@ -86,6 +86,7 @@ function setupTabs() {
 }
 
 async function renderTab() {
+  if (currentTab !== 'movimenti') document.getElementById('fab-mese')?.remove();
   if (currentTab === 'piano') await renderPiano();
   else if (currentTab === 'movimenti') await renderMovimenti();
   else if (currentTab === 'budget') await renderBudget();
